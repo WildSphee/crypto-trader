@@ -273,7 +273,10 @@ def evaluate_combo(
 
             trades = int(signal.sum())
             hit_rate = float((net[signal == 1] > 0).mean()) if trades > 0 else np.nan
-            avg_net = float(net.mean()) if trades > 0 else 0.0
+            
+            avg_net_ret_per_bar   = float(np.nanmean(net)) if trades > 0 else 0.0
+            avg_net_ret_per_trade = float(np.nanmean(net[signal == 1])) if trades > 0 else np.nan
+            
             eq = np.cumprod(1.0 + np.nan_to_num(net, nan=0.0))
             total_ret = float(eq[-1] - 1.0) if len(eq) else 0.0
             mu = np.nanmean(net) if trades > 1 else 0.0
@@ -285,7 +288,8 @@ def evaluate_combo(
                     "threshold": thr,
                     "trades": trades,
                     "hit_rate": hit_rate,
-                    "avg_net_ret_per_bar": avg_net,
+                    "avg_net_ret_per_bar": avg_net_ret_per_bar,
+                    "avg_net_ret_per_trade": avg_net_ret_per_trade,
                     "total_net_return": total_ret,
                     "sharpe_like": sharpe,
                 }
@@ -329,17 +333,17 @@ def main():
     p.add_argument("--symbol", default="BTCUSDT")
     p.add_argument(
         "--start-list",
-        default="120d,200d,365d,730d",
+        default="120d,365d,730d",
         help="Comma list of windows or absolute dates, e.g. '180d,365d,2021-01-01,90 days ago UTC'.",
     )
     p.add_argument(
         "--intervals",
-        default="15m,30m,1h,4h",
+        default="30m,1h,2h,4h",
         help="Comma list, e.g. '5m,15m,1h,4h,1d'.",
     )
     p.add_argument(
         "--models",
-        default="logreg,hgb,rf,hgb,linsvc",
+        default="logreg,hgb,rf,hgb,linsvc,sdglog",
         help="Comma list: logreg,sgdlog,rf,hgb,linsvc",
     )
     p.add_argument("--timelag", type=int, default=20)
@@ -361,9 +365,9 @@ def main():
     p.add_argument("--out-dir", default="backtest_output")
     p.add_argument("--save-datasets", action="store_true")
     p.add_argument("--save-predictions", action="store_true")
-    p.add_argument("--threshold-sweep", default=None, help="e.g. '0.50:0.75:0.01'")
+    p.add_argument("--threshold-sweep", default="0.50:0.75:0.01", help="start:stop:step for p_up threshold, e.g. '0.50:0.75:0.01'")
     p.add_argument("--fees-bps", type=float, default=10.0)
-    p.add_argument("--slippage-bps", type=float, default=2)
+    p.add_argument("--slippage-bps", type=float, default=5)
     args = p.parse_args()
 
     start_list = parse_start_list(args.start_list)
