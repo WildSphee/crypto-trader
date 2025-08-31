@@ -1,363 +1,205 @@
-# used for time
-import datetime
+# Trading bot using OOP:
+# - Loads history + builds features
+# - Trains a Logistic Regression pipeline (proper train/test split)
+# - On each closed bar: updates data, optionally re-trains (configurable),
+#   gets a single prediction, sizes with capped Kelly, and trades long-only.
+#
+# IMPORTANT: This is an educational template. Real trading needs more safety checks,
+# error handling, and risk controls than this example.
+
+from __future__ import annotations
+
 import time
 
-import numpy as np
 import pandas as pd
-import talib
-
-# needed for the binance API / websockets / Exception handling
 from binance.client import Client
-from binance.enums import *
-from sklearn import metrics
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
 
 import config
-from historical_data import HistoricalData, client
+from history_manager import INTERVAL_TO_MS, HistoryManager
+
+# from binance.enums import *
+from model_manager import ModelManager
+from position_manager import PositionManager, SizingConfig
+
+# ---------- Utilities ----------
 
 
-class Trade(HistoricalData):
-    def __init__(self, symbol, interval):
-        HistoricalData.__init__(self, symbol, interval, config.start_str)
-        self.optimal_ratio: float = 0.99
-        self.quantity: float = 0.039
-        self.predicted_up_prob = 0
-        self.predicted_down_prob = 1
-        self.recent_LOHCV = np.array([[]], dtype="d")
-
-        self.df = pd.DataFrame()
-        self.up_down = np.array([], dtype="int32")
-        # latest 50 intervals
-        self.close = np.array([], dtype="d")
-        self.high = np.array([], dtype="d")
-        self.low = np.array([], dtype="d")
-        self.volume = np.array([], dtype="d")
-        self.open = np.array([], dtype="d")
-
-        self.minutes = 60
-
-    def set_price(self) -> str:
-        # Fetch 500 most recent price
-        klines = client.get_klines(symbol=self.symbol, interval=self.interval, limit=25)
-
-        self.recent_LOHCV = np.array(klines, dtype="d")
-
-    def get_history_timestamp(self) -> str:
-        return self.recent_LOHCV[-1][0]
-
-    def append_current_to_df(self):
-        predictors = {
-            "EMA": self.ema_arr,
-            "CMO": self.cmo_arr,
-            "MINUSDM": self.minusdm_arr,
-            "PLUSDM": self.plusdm_arr,
-            "CLOSE": self.close_arr,
-            "CLOSEL1": self.closel1_arr,
-            "CLOSEL2": self.closel2_arr,
-            "CLOSEL3": self.closel3_arr,
-            "3O": self.threeoutsideupdown,
-            "CMB": self.closingmaru,
-        }
-        self.df = pd.DataFrame(predictors)
-
-        if self.close_arr[-1] > self.close_arr[-2]:
-            self.up_down = np.append(self.up_down, 1)
-        else:
-            self.up_down = np.append(self.up_down, 0)
-
-        self.df["UP_DOWN"] = self.up_down
-        self.df = self.df.dropna()
-
-    def append_history_to_df(self):
-        predictors = {
-            "EMA": self.ema_arr,
-            "CMO": self.cmo_arr,
-            "MINUSDM": self.minusdm_arr,
-            "PLUSDM": self.plusdm_arr,
-            "CLOSE": self.close_arr,
-            "CLOSEL1": self.closel1_arr,
-            "CLOSEL2": self.closel2_arr,
-            "CLOSEL3": self.closel3_arr,
-            "3O": self.threeoutsideupdown,
-            "CMB": self.closingmaru,
-        }
-
-        self.df = pd.DataFrame(predictors)
-
-        # Modify up_down array such that timelag = 1
-        self.up_down = np.append(self.up_down, np.nan)
-        for i in range(self.close_arr.size - 1):
-            j = i + 1
-            if self.close_arr[i] != np.nan:
-                if self.close_arr[j] > self.close_arr[i]:
-                    self.up_down = np.append(self.up_down, 1)
-                else:
-                    self.up_down = np.append(self.up_down, 0)
-            else:
-                self.up_down[i] = np.nan
-
-        # add a column for logistic regression
-        self.df["UP_DOWN"] = self.up_down
-        # drop na
-        # time lag = 1
-        self.df["UP_DOWN"] = self.df["UP_DOWN"].shift(-1)
-        self.df = self.df.dropna()
-        self.df["UP_DOWN"] = self.df["UP_DOWN"].astype(np.int64)
-
-    # Update Technical Indicators per 5 minutes(after model prediction)
-    def UpdateModelperInterval(self):
-        self.set_price()
-
-        # update recent array, get latest TA array from them
-        self.close_arr = np.append(self.close_arr, self.recent_LOHCV[-1][4])
-        self.high_arr = np.append(self.high_arr, self.recent_LOHCV[-1][2])
-        self.low_arr = np.append(self.low_arr, self.recent_LOHCV[-1][3])
-        self.open_arr = np.append(self.open_arr, self.recent_LOHCV[-1][1])
-        self.volume_arr = np.append(self.volume_arr, self.recent_LOHCV[-1][5])
-
-        self.closel1_arr = np.append(self.closel1_arr, self.recent_LOHCV[-2][4])
-        self.closel2_arr = np.append(self.closel2_arr, self.recent_LOHCV[-3][4])
-        self.closel3_arr = np.append(self.closel3_arr, self.recent_LOHCV[-4][4])
-
-        # update TA arrays to time t
-        self.ema_arr = talib.EMA(self.close_arr, self.timelag)
-        self.cmo_arr = talib.CMO(self.close_arr, self.timelag)
-        self.minusdm_arr = talib.MINUS_DM(self.high_arr, self.low_arr, self.timelag)
-        self.plusdm_arr = talib.PLUS_DM(self.high_arr, self.low_arr, self.timelag)
-        # recent close
-        self.threeoutsideupdown = talib.CDL3OUTSIDE(
-            self.open_arr, self.high_arr, self.low_arr, self.close_arr
-        )
-        self.closingmaru = talib.CDLCLOSINGMARUBOZU(
-            self.open_arr, self.high_arr, self.low_arr, self.close_arr
-        )
-
-        if self.threeoutsideupdown[-1] == 100:
-            self.threeoutsideupdown[-1] = 1
-        if self.threeoutsideupdown[-1] == -100:
-            self.threeoutsideupdown[-1] == 0
-        if self.closingmaru[-1] == 100:
-            self.closingmaru[-1] = 1
-        if self.closingmaru[-1] == -100:
-            self.closingmaru[-1] == 0
-
-        # todo
-
-    def GetPrediction(self):
-        predictors = [
-            "EMA",
-            "CMO",
-            "MINUSDM",
-            "PLUSDM",
-            "CLOSE",
-            "CLOSEL1",
-            "CLOSEL2",
-            "CLOSEL3",
-            "3O",
-            "CMB",
-        ]
-        # Split test & training set
-        X = self.df[predictors]  # predictor
-        y = self.df.UP_DOWN  # response
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=1
-        )
-
-        # Normalize data
-        scaler = StandardScaler().fit(X_train[predictors[0:-2]])
-        X_train[predictors[0:-2]] = scaler.transform(X_train[predictors[0:-2]])
-        X_test[predictors[0:-2]] = scaler.transform(X_test[predictors[0:-2]])
-
-        logreg = LogisticRegression(max_iter=200)
-        logreg.fit(X_test, y_test)
-
-        y_pred = logreg.predict(X_test)
-        pred_rate = metrics.accuracy_score(y_test, y_pred)
-
-        X_new = self.df.iloc[-1:]
-        X_new = X_new[predictors]
-
-        X_new[predictors[0:-2]] = scaler.transform(X_new[predictors[0:-2]])
-
-        up_down = logreg.predict(X_new)
-        # print(logreg.predict_proba(X_new))
-        self.predicted_up_prob = logreg.predict_proba(X_new)[0][1]
-        self.predicted_down_prob = 1 - self.predicted_up_prob
-
-        return up_down[0]
-
-    def SetQuantity(self):
-        curr_price: float = self.close_arr[-1]
-        usdt_balance: float = float(client.get_asset_balance(asset="USDT")["free"])
-        updown_change: float = 0.003
-
-        # Kelly's criteriation
-        self.optimal_ratio: float = (
-            self.predicted_up_prob - self.predicted_down_prob
-        ) / updown_change
-        if self.optimal_ratio > 0.99:
-            self.optimal_ratio = 0.99
-
-        self.quantity = self.optimal_ratio * (usdt_balance / curr_price)
-        self.quantity = round(self.quantity, 4)
-
-        print(
-            "Optimal amount of capital invested calculated by Kelly Criterion: ",
-            self.quantity,
-        )
-
-    def long(self, sym, size):
-        order = client.order_market_buy(symbol=sym, quantity=size)
-
-        return order
-
-    def short(self, sym, size):
-        order = client.order_market_sell(symbol=sym, quantity=size)
-
-        return order
-
-
-# human readable format
-def datetime_from_utc_to_local(utc_datetime):
-    now_timestamp = time.time()
-    offset = datetime.datetime.fromtimestamp(
-        now_timestamp
-    ) - datetime.datetime.utcfromtimestamp(now_timestamp)
-    return utc_datetime + offset
-
-
-def get_now_timestamp() -> datetime.datetime:
+def _map_trade_interval_to_binance(interval_code: str) -> str:
     """
-    Returns today's timestamp
+    Accepts: "5m", "15m", "1h" (or any that map to Client.KLINE_INTERVAL_*).
     """
-    curr_time = datetime.datetime.now()
-    now = curr_time.timestamp()
-    return now
+    m = {
+        "1m": Client.KLINE_INTERVAL_1MINUTE,
+        "3m": Client.KLINE_INTERVAL_3MINUTE,
+        "5m": Client.KLINE_INTERVAL_5MINUTE,
+        "15m": Client.KLINE_INTERVAL_15MINUTE,
+        "30m": Client.KLINE_INTERVAL_30MINUTE,
+        "1h": Client.KLINE_INTERVAL_1HOUR,
+        "2h": Client.KLINE_INTERVAL_2HOUR,
+        "4h": Client.KLINE_INTERVAL_4HOUR,
+        "6h": Client.KLINE_INTERVAL_6HOUR,
+        "8h": Client.KLINE_INTERVAL_8HOUR,
+        "12h": Client.KLINE_INTERVAL_12HOUR,
+        "1d": Client.KLINE_INTERVAL_1DAY,
+    }
+    if interval_code not in m:
+        raise ValueError(f"Unsupported trade_interval: {interval_code}")
+    return m[interval_code]
 
 
-def convertTimestamp(timestamp):
-    return datetime.datetime.fromtimestamp(timestamp / 1000)
+class TradeBot:
+    def __init__(
+        self,
+        symbol: str = "BTCUSDT",
+        trade_interval_code: str = None,
+        start_str: str = None,
+        timelag: int = 20,
+        retrain_every: int = 50,  # retrain every N bars (set 1 if you want each bar)
+    ) -> None:
+        # config fallbacks
+        trade_interval_code = trade_interval_code or getattr(
+            config, "trade_interval", "5m"
+        )
+        start_str = start_str or getattr(config, "start_str", "60 days ago UTC")
+
+        self.client = Client(
+            getattr(config, "api_key", None),
+            getattr(config, "api_secret", None),
+            testnet=getattr(config, "is_test_net", False),
+        )
+
+        self.symbol = symbol
+        self.interval = _map_trade_interval_to_binance(trade_interval_code)
+        self.interval_ms = INTERVAL_TO_MS[self.interval]
+        self.retrain_every = max(1, retrain_every)
+
+        # data + model + position managers
+        self.data = HistoryManager(
+            client=self.client,
+            symbol=self.symbol,
+            interval=self.interval,
+            start_str=start_str,
+            timelag=timelag,
+        )
+        self.model = ModelManager(predictor_cols=self.data.predictor_cols)
+        self.position = PositionManager(
+            client=self.client,
+            symbol=self.symbol,
+            sizing=SizingConfig(),
+        )
+
+        self._bars_since_retrain = 0
+
+    # ---------- Lifecycle ----------
+
+    def bootstrap(self) -> None:
+        """
+        Load history, build features, and train the model once.
+        """
+        print("Loading historical data...")
+        self.data.load_history()
+        X, y = self.data.dataset()
+
+        print(f"Dataset ready: {len(X)} rows, {len(self.data.predictor_cols)} features")
+        acc = self.model.train(X, y)
+        print(f"Initial test accuracy: {acc:.3f}")
+
+    def _update_and_maybe_retrain(self) -> None:
+        """
+        Update data with the latest closed bar; retrain according to schedule.
+        """
+        self.data.update_with_latest(limit=3)
+        self._bars_since_retrain += 1
+
+        if self._bars_since_retrain >= self.retrain_every:
+            X, y = self.data.dataset()
+            try:
+                acc = self.model.train(X, y)
+                print(f"Retrained. Test accuracy: {acc:.3f}")
+            except Exception as e:
+                print(f"[WARN] Retrain skipped: {e}")
+            self._bars_since_retrain = 0
+
+    # ---------- Trading Loop ----------
+
+    def run(self) -> None:
+        """
+        Main loop: wait for each closed bar, then decide and act (long-only).
+        Closes any prior long at the bar boundary (following your original logic),
+        then decides whether to open a new long for the next bar.
+        """
+        self.bootstrap()
+
+        # compute the first decision time (close of next bar)
+        next_trade_time = self.data.next_bar_close_time_ms()
+        print(f"Next decision at ~{pd.to_datetime(next_trade_time, unit='ms')}")
+
+        while True:
+            now_ms = int(time.time() * 1000)
+
+            # If time passed the expected decision point, process (may need to catch up)
+            if now_ms >= next_trade_time:
+                # For robustness, catch up if multiple bars elapsed
+                while now_ms >= next_trade_time:
+                    print(f"\n[BAR CLOSE] {pd.to_datetime(next_trade_time, unit='ms')}")
+                    # Update data and (optionally) retrain
+                    self._update_and_maybe_retrain()
+
+                    # Close any existing long from the previous signal (your original design)
+                    self.position.close_long()
+
+                    # Prepare a single prediction for the new bar
+                    X_new = self.data.latest_features_row()
+                    # The last price (close of just-closed bar)
+                    last_price = float(X_new["CLOSE"].iloc[0])
+
+                    try:
+                        p_up = self.model.predict_proba_up(X_new)
+                    except Exception as e:
+                        print(f"[WARN] Prediction skipped: {e}")
+                        p_up = 0.5
+
+                    p_down = 1.0 - p_up
+                    print(f"Predicted up/down: {p_up:.3f}/{p_down:.3f}")
+
+                    # Long-only logic
+                    if p_up >= 0.5:
+                        qty = self.position.compute_quantity_kelly(p_up, last_price)
+                        print(f"Computed qty (kelly-capped): {qty}")
+                        self.position.open_long(qty)
+                    else:
+                        print("Signal not long; staying flat (shorting disabled).")
+
+                    # schedule next bar decision
+                    next_trade_time += self.interval_ms
+
+                # show current balances
+                try:
+                    usdt_bal = self.client.get_asset_balance(asset="USDT")
+                    base_asset = self.symbol.replace("USDT", "")
+                    base_bal = self.client.get_asset_balance(asset=base_asset)
+                    print(
+                        f"Balances: USDT={usdt_bal['free']} {base_asset}={base_bal['free']}"
+                    )
+                except Exception as e:
+                    print(f"[WARN] Balance fetch failed: {e}")
+
+            # small sleep to avoid busy loop
+            try:
+                time.sleep(1)
+            except Exception:
+                pass
 
 
-def main():
-    if config.trade_interval == "5m":
-        trade = Trade("BTCUSDT", Client.KLINE_INTERVAL_5MINUTE)
-        trade.minutes = 5
-    elif config.trade_interval == "15m":
-        trade = Trade("BTCUSDT", Client.KLINE_INTERVAL_15MINUTE)
-        trade.minutes = 15
-    else:
-        trade = Trade("BTCUSDT", Client.KLINE_INTERVAL_1HOUR)
-        trade.minutes = 60
+# ---------- Entrypoint ----------
 
-    print("Appending Historical Data...")
-
-    trade.InitAllHistoricalData()
-    trade.append_history_to_df()
-    trade.set_price()
-
-    print("Finished Appending Historical Data...")
-
-    now = int(get_now_timestamp()) * 1000
-
-    usdt_balance = client.get_asset_balance(asset="USDT")
-    btc_balance = client.get_asset_balance(asset="BTC")
-    print("\n", "Your Balance: ", usdt_balance, btc_balance, "\n")
-    last_quantity: float = trade.quantity
-
-    # get the latest&first timestamp in string
-    delta = 60000 * trade.minutes
-    latest_timestamp: int = trade.get_history_timestamp()
-    first_dealtime: int = int(latest_timestamp + delta)
-
-    print("Binance Auto Trading Starts...")
-    print("Time for first trade: ", convertTimestamp(first_dealtime))
-
-    global isLong
-    isLong = True
-    # time increment
-    dealtime = first_dealtime  # for continuous orders
-
-    while True:
-        now: int = int(datetime.datetime.now().timestamp()) * 1000
-        # sync first deal
-        if now == first_dealtime:
-            dealtime += delta
-
-            trade.UpdateModelperInterval()  # predictor arr is now filled
-            trade.append_current_to_df()  # update whole model
-            if trade.GetPrediction() == 0:
-                isLong = False
-                print("Predicted Long Probability: ", trade.predicted_up_prob)
-                print("Predicted Short Probability: ", trade.predicted_down_prob, "\n")
-
-                print(
-                    "Shorting is not allowed in the developers jurisdiction. No action is performed. \n"
-                )
-
-            if trade.GetPrediction() == 1:
-                isLong = True
-                # set quantity
-
-                trade.SetQuantity()
-                print("Predicted Long Probability: ", trade.predicted_up_prob)
-                print("Predicted Short Probability: ", trade.predicted_down_prob, "\n")
-                last_quantity = trade.quantity
-
-                order = trade.long(trade.symbol, trade.quantity)
-
-                print("Long", order)
-
-                usdt_balance = client.get_asset_balance(asset="USDT")
-                btc_balance = client.get_asset_balance(asset="BTC")
-                print("\n", "Your Balance: ", usdt_balance, btc_balance, "\n")
-
-                # dont do Long
-            print("Time for next Trade: ", convertTimestamp(dealtime), "\n")
-
-            time.sleep(1)
-
-        if now == dealtime:
-            trade.UpdateModelperInterval()  # predictor arr is now filled
-            trade.append_current_to_df()  # update whole model
-
-            # close order
-            if isLong:
-                order = trade.short(trade.symbol, last_quantity)
-                print("Close Long", order)
-
-                usdt_balance = client.get_asset_balance(asset="USDT")
-                btc_balance = client.get_asset_balance(asset="BTC")
-                print("\n", "Your Balance: ", usdt_balance, btc_balance, "\n")
-
-            time.sleep(1)
-            if trade.GetPrediction() == 0:
-                isLong = False
-                print("Predicted Long Probability: ", trade.predicted_up_prob)
-                print("Predicted Short Probability: ", trade.predicted_down_prob, "\n")
-
-                print(
-                    "Shorting is not allowed in the developers jurisdiction. No action is performed. \n"
-                )
-
-            if trade.GetPrediction() == 1:
-                isLong = True
-                # set quantity
-                trade.SetQuantity()
-                print("Predicted Long Probability: ", trade.predicted_up_prob)
-                print("Predicted Short Probability: ", trade.predicted_down_prob, "\n")
-                last_quantity = trade.quantity
-
-                order = trade.long(trade.symbol, trade.quantity)
-                print("Long", order)
-
-                usdt_balance = client.get_asset_balance(asset="USDT")
-                btc_balance = client.get_asset_balance(asset="BTC")
-                print(usdt_balance, btc_balance)
-
-            dealtime += delta
-            print("Time for next Trade: ", convertTimestamp(dealtime), "\n")
-
-            time.sleep(1)
+if __name__ == "__main__":
+    # Choose interval from config.trade_interval ("5m", "15m", "1h", ...)
+    bot = TradeBot(
+        symbol="BTCUSDT",
+        trade_interval_code=getattr(config, "trade_interval", "5m"),
+        start_str=getattr(config, "start_str", "60 days ago UTC"),
+        timelag=20,
+        retrain_every=50,  # set to 1 if you want to retrain on every new bar
+    )
+    bot.run()
