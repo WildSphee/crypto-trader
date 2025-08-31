@@ -259,48 +259,50 @@ def evaluate_combo(
             index=False,
         )
 
-    # 4) Threshold sweep
-    thr_file = ""
+    cost_rt = 2.0 * ((fees_bps + slippage_bps) / 10_000.0)
+    best_metric = "sharpe_like"  # or "total_net_return" / "avg_net_ret_per_bar"
+
+    def _pnl_for_threshold(thr_val: float):
+        signal = (p_up_test >= thr_val).astype(int)
+        # net returns per test bar (nan-safe stats)
+        net = signal * fwd_test - signal * cost_rt
+
+        trades = int(signal.sum())
+        hit_rate = float((net[signal == 1] > 0).mean()) if trades > 0 else float("nan")
+        avg_net_ret_per_bar   = float(np.nanmean(net)) if trades > 0 else 0.0
+        avg_net_ret_per_trade = float(np.nanmean(net[signal == 1])) if trades > 0 else float("nan")
+
+        eq = np.cumprod(1.0 + np.nan_to_num(net, nan=0.0))
+        total_ret = float(eq[-1] - 1.0) if len(eq) else 0.0
+
+        mu = np.nanmean(net) if trades > 1 else 0.0
+        sd = np.nanstd(net, ddof=1) if trades > 1 else 0.0
+        bpy = bars_per_year_from_interval(interval_code)
+        sharpe = float((mu / sd) * np.sqrt(bpy)) if sd > 0 else float("nan")
+
+        return {
+            "threshold": float(thr_val),
+            "trades": trades,
+            "hit_rate": hit_rate,
+            "avg_net_ret_per_bar": avg_net_ret_per_bar,
+            "avg_net_ret_per_trade": avg_net_ret_per_trade,
+            "total_net_return": total_ret,
+            "sharpe_like": sharpe,
+        }
+
+    best = None
     if threshold_sweep:
         a, b, step = threshold_sweep
         thresholds = np.round(np.arange(a, b + 1e-12, step), 6)
-        cost_rt = 2.0 * ((fees_bps + slippage_bps) / 10_000.0)
-        rows = []
-        bpy = bars_per_year_from_interval(interval_code)
-        for thr in thresholds:
-            signal = (p_up_test >= thr).astype(int)
-            net = one_bar_pnl(signal, fwd_test, cost_rt)
+        # evaluate & pick best
+        candidates = [_pnl_for_threshold(th) for th in thresholds]
+        if candidates:
+            best = max(candidates, key=lambda r: (-np.inf if np.isnan(r[best_metric]) else r[best_metric]))
+    else:
+        # no sweep provided → evaluate at 0.50 so summary still has P&L
+        best = _pnl_for_threshold(0.50)
 
-            trades = int(signal.sum())
-            hit_rate = float((net[signal == 1] > 0).mean()) if trades > 0 else np.nan
-            
-            avg_net_ret_per_bar   = float(np.nanmean(net)) if trades > 0 else 0.0
-            avg_net_ret_per_trade = float(np.nanmean(net[signal == 1])) if trades > 0 else np.nan
-            
-            eq = np.cumprod(1.0 + np.nan_to_num(net, nan=0.0))
-            total_ret = float(eq[-1] - 1.0) if len(eq) else 0.0
-            mu = np.nanmean(net) if trades > 1 else 0.0
-            sd = np.nanstd(net, ddof=1) if trades > 1 else 0.0
-            sharpe = float((mu / sd) * np.sqrt(bpy)) if sd > 0 else np.nan
-
-            rows.append(
-                {
-                    "threshold": thr,
-                    "trades": trades,
-                    "hit_rate": hit_rate,
-                    "avg_net_ret_per_bar": avg_net_ret_per_bar,
-                    "avg_net_ret_per_trade": avg_net_ret_per_trade,
-                    "total_net_return": total_ret,
-                    "sharpe_like": sharpe,
-                }
-            )
-        thr_df = pd.DataFrame(rows)
-        thr_file = os.path.join(
-            out_dir, "thresholds", f"THRESH_{start_str.replace(' ', '_')}_{tag}.csv"
-        )
-        thr_df.to_csv(thr_file, index=False)
-
-    # 5) Summary row
+    # 5) Summary row (now includes best-threshold P&L)
     return {
         "symbol": symbol,
         "interval": interval_code,
@@ -319,11 +321,17 @@ def evaluate_combo(
         "f1": float(f1),
         "auc": float(auc),
         "confusion_matrix": cm,
-        "thresholds_file": os.path.basename(thr_file) if thr_file else "",
+        # best threshold & money metrics (no separate thresholds file)
+        "best_threshold": float(best["threshold"]) if best else 0.50,
+        "trades": int(best["trades"]) if best else 0,
+        "hit_rate": float(best["hit_rate"]) if best else float("nan"),
+        "avg_net_ret_per_bar": float(best["avg_net_ret_per_bar"]) if best else 0.0,
+        "avg_net_ret_per_trade": float(best["avg_net_ret_per_trade"]) if best else float("nan"),
+        "total_net_return": float(best["total_net_return"]) if best else 0.0,
+        "sharpe_like": float(best["sharpe_like"]) if best else float("nan"),
+        # for sanity/reference
+        "cost_roundtrip": float(cost_rt),
     }
-
-
-# ---------- CLI ----------
 
 
 def main():
@@ -343,7 +351,7 @@ def main():
     )
     p.add_argument(
         "--models",
-        default="logreg,hgb,rf,hgb,linsvc,sdglog",
+        default="logreg,hgb,rf,hgb,linsvc,sgdlog",
         help="Comma list: logreg,sgdlog,rf,hgb,linsvc",
     )
     p.add_argument("--timelag", type=int, default=20)
