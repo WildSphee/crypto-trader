@@ -134,6 +134,7 @@ files = [
 
 [package.dependencies]
 frozenlist = ">=1.1.0"
+typing-extensions = {version = ">=4.2", markers = "python_version < \"3.13\""}
 
 [[package]]
 name = "appnope"
@@ -183,6 +184,27 @@ dev = ["cloudpickle ; platform_python_implementation == \"CPython\"", "hypothesi
 docs = ["cogapp", "furo", "myst-parser", "sphinx", "sphinx-notfound-page", "sphinxcontrib-towncrier", "towncrier"]
 tests = ["cloudpickle ; platform_python_implementation == \"CPython\"", "hypothesis", "mypy (>=1.11.1) ; platform_python_implementation == \"CPython\" and python_version >= \"3.10\"", "pympler", "pytest (>=4.3.0)", "pytest-mypy-plugins ; platform_python_implementation == \"CPython\" and python_version >= \"3.10\"", "pytest-xdist[psutil]"]
 tests-mypy = ["mypy (>=1.11.1) ; platform_python_implementation == \"CPython\" and python_version >= \"3.10\"", "pytest-mypy-plugins ; platform_python_implementation == \"CPython\" and python_version >= \"3.10\""]
+
+[[package]]
+name = "build"
+version = "1.3.0"
+description = "A simple, correct Python build frontend"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "build-1.3.0-py3-none-any.whl", hash = "sha256:7145f0b5061ba90a1500d60bd1b13ca0a8a4cebdd0cc16ed8adf1c0e739f43b4"},
+    {file = "build-1.3.0.tar.gz", hash = "sha256:698edd0ea270bde950f53aed21f3a0135672206f3911e0176261a31e0e07b397"},
+]
+
+[package.dependencies]
+colorama = {version = "*", markers = "os_name == \"nt\""}
+packaging = ">=19.1"
+pyproject_hooks = "*"
+
+[package.extras]
+uv = ["uv (>=0.1.18)"]
+virtualenv = ["virtualenv (>=20.11) ; python_version < \"3.10\"", "virtualenv (>=20.17) ; python_version >= \"3.10\" and python_version < \"3.14\"", "virtualenv (>=20.31) ; python_version >= \"3.14\""]
 
 [[package]]
 name = "certifi"
@@ -373,7 +395,7 @@ description = "Cross-platform colored terminal text."
 optional = false
 python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*,>=2.7"
 groups = ["main"]
-markers = "sys_platform == \"win32\""
+markers = "sys_platform == \"win32\" or os_name == \"nt\""
 files = [
     {file = "colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6"},
     {file = "colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44"},
@@ -1209,6 +1231,18 @@ files = [
 ptyprocess = ">=0.5"
 
 [[package]]
+name = "pip"
+version = "25.2"
+description = "The PyPA recommended tool for installing Python packages."
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "pip-25.2-py3-none-any.whl", hash = "sha256:6d67a2b4e7f14d8b31b8b52648866fa717f45a1eb70e83002f4331d07e953717"},
+    {file = "pip-25.2.tar.gz", hash = "sha256:578283f006390f85bb6282dffb876454593d637f5d1be494b5202ce4877e71f2"},
+]
+
+[[package]]
 name = "platformdirs"
 version = "4.4.0"
 description = "A small Python package for determining appropriate platform-specific dirs, e.g. a `user data dir`."
@@ -1480,6 +1514,18 @@ files = [
 windows-terminal = ["colorama (>=0.4.6)"]
 
 [[package]]
+name = "pyproject-hooks"
+version = "1.2.0"
+description = "Wrappers to call pyproject.toml-based build backend hooks."
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+files = [
+    {file = "pyproject_hooks-1.2.0-py3-none-any.whl", hash = "sha256:9e5c6bfa8dcc30091c74b0cf803c81fdd29d94f01992a7707bc97babb1141913"},
+    {file = "pyproject_hooks-1.2.0.tar.gz", hash = "sha256:1e859bd5c40fae9448642dd871adf459e5e2084186e8d2c2a79a824c970da1f8"},
+]
+
+[[package]]
 name = "python-binance"
 version = "1.0.29"
 description = "Binance REST API python implementation"
@@ -1513,6 +1559,21 @@ files = [
 
 [package.dependencies]
 six = ">=1.5"
+
+[[package]]
+name = "python-dotenv"
+version = "1.1.1"
+description = "Read key-value pairs from a .env file and set them as environment variables"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "python_dotenv-1.1.1-py3-none-any.whl", hash = "sha256:31f23644fe2602f88ff55e1f5c79ba497e01224ee7737937930c448e4d0e24dc"},
+    {file = "python_dotenv-1.1.1.tar.gz", hash = "sha256:a8a6399716257f45be6a007360200409fce5cda2661e3dec71d23dc15f6189ab"},
+]
+
+[package.extras]
+cli = ["click (>=5.0)"]
 
 [[package]]
 name = "pytz"
@@ -1967,6 +2028,67 @@ pure-eval = "*"
 tests = ["cython", "littleutils", "pygments", "pytest", "typeguard"]
 
 [[package]]
+name = "ta-lib"
+version = "0.6.6"
+description = "Python wrapper for TA-Lib"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "ta_lib-0.6.6-cp310-cp310-macosx_13_0_x86_64.whl", hash = "sha256:6fcb2f0f4aaa2a27697779ac80522e26a231e9a61bae213e3f05664f8379b79e"},
+    {file = "ta_lib-0.6.6-cp310-cp310-macosx_14_0_arm64.whl", hash = "sha256:7c02fc8cc6ad8d3c11f37cb3984f4bd05409ec8a620e1b9c5039e3acd790c03e"},
+    {file = "ta_lib-0.6.6-cp310-cp310-manylinux_2_28_aarch64.whl", hash = "sha256:11e0fb4cccb580f751bed979d99edfb705abd71e4c486eecf19a8b058f8a5e2e"},
+    {file = "ta_lib-0.6.6-cp310-cp310-manylinux_2_28_x86_64.whl", hash = "sha256:f888840c2976cac803616ceed1469acb4321fb629e9de50d43199b07b4c65ba9"},
+    {file = "ta_lib-0.6.6-cp310-cp310-musllinux_1_2_aarch64.whl", hash = "sha256:ca6250acb2be2752bd5b5fd45527368876616d13a1b0b93c34d828a99e35df9d"},
+    {file = "ta_lib-0.6.6-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:7258d5b21bcc8f9933b36e14f41699130cc0eaba32f672a038dacaf59de0d0c3"},
+    {file = "ta_lib-0.6.6-cp310-cp310-win32.whl", hash = "sha256:c09be210ad112a48e84d9e2de2cf7b85cd881f28800083d2a5c78a4c564a1577"},
+    {file = "ta_lib-0.6.6-cp310-cp310-win_amd64.whl", hash = "sha256:e253a89ef61e09bdf8fe5c4ba158d8cde23fdf1af9bd752485b7fd372e27d069"},
+    {file = "ta_lib-0.6.6-cp310-cp310-win_arm64.whl", hash = "sha256:8037a45d74462ab5abc336e7e9e8ab97699f5f8945c843d0ea059c54c037dba2"},
+    {file = "ta_lib-0.6.6-cp311-cp311-macosx_13_0_x86_64.whl", hash = "sha256:1895b3e267f2865606730ada57e6f9b3c811991b51c23604eed6e983ce6eeec1"},
+    {file = "ta_lib-0.6.6-cp311-cp311-macosx_14_0_arm64.whl", hash = "sha256:8fff512d994b47a54623e5cc20c90554be91265f7805707e32f07e6e6aa24fd7"},
+    {file = "ta_lib-0.6.6-cp311-cp311-manylinux_2_28_aarch64.whl", hash = "sha256:47d8afeef9f8322e8794f4409c6fbf4ea84da72b49bc37beb0d14dd5dee48d5d"},
+    {file = "ta_lib-0.6.6-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:c84d6c0bef3f08560158ad6aff5bfb9eb4e2956c92f862fd5f8f07ee7c8e987a"},
+    {file = "ta_lib-0.6.6-cp311-cp311-musllinux_1_2_aarch64.whl", hash = "sha256:12a7906de3e5a5704b01a255e757895d340e4ed89dfe647c59103d96a70fc992"},
+    {file = "ta_lib-0.6.6-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:98cb46505de5d5ac86bb41d6ebe14d6abe125ac11506ab9d02c9eb9738a09bc0"},
+    {file = "ta_lib-0.6.6-cp311-cp311-win32.whl", hash = "sha256:4c4b844bf2af11778e8cb83b4cf87fde51e333cc73b6eb539463b79edd92808f"},
+    {file = "ta_lib-0.6.6-cp311-cp311-win_amd64.whl", hash = "sha256:f8a6105a8a0d12f1db24f2286ec08c05c26c36fdf963f15acc528a34ef78e8ea"},
+    {file = "ta_lib-0.6.6-cp311-cp311-win_arm64.whl", hash = "sha256:51cefbe29b80eceb7be36347871ba11c7783e66447a814666c0aed8066a92806"},
+    {file = "ta_lib-0.6.6-cp312-cp312-macosx_13_0_x86_64.whl", hash = "sha256:e812771dcf4478874f73eb803b0d3a07d21b761e70fe512dd380b5e8dc8f11ac"},
+    {file = "ta_lib-0.6.6-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:d0d374735fec756cbcc81b21c2ba0fb5a7e476892abb76834f656f9b58050acd"},
+    {file = "ta_lib-0.6.6-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:edb677bed128542a26dd29e0b0b2b77ff48dc2f4d9b0b24af5320accae9aa47d"},
+    {file = "ta_lib-0.6.6-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:bf3f7a1c20f8626ce6dcecf1ade6b8972f4fd0b3965f1a306cea6dc81a49b0b1"},
+    {file = "ta_lib-0.6.6-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:f714fb78d8c79d8703994ec699f51b02aef099773d1efb6e6143541e4e3daabf"},
+    {file = "ta_lib-0.6.6-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:35c6bfa94a6ebaefad5fea220b50af5dcb7d8916049d00bb175679bede5b7ac7"},
+    {file = "ta_lib-0.6.6-cp312-cp312-win32.whl", hash = "sha256:9dd9c8f3edd4bc91f3915ea080ff2b27336080a17256bc95319b7f50a8ac3ae5"},
+    {file = "ta_lib-0.6.6-cp312-cp312-win_amd64.whl", hash = "sha256:3af21f6e296833e0f39c9f3fde9479c6ad6aa8023c3dceae6f229660d44d2d01"},
+    {file = "ta_lib-0.6.6-cp312-cp312-win_arm64.whl", hash = "sha256:9f400621445f099fb6ade76014af2e410eabe42cd637de6bd11f289c6e1cb137"},
+    {file = "ta_lib-0.6.6-cp313-cp313-macosx_13_0_x86_64.whl", hash = "sha256:6f2f4702bc85248c166a52a0d8f39762c953a63bc929308a9485a53b985ecf41"},
+    {file = "ta_lib-0.6.6-cp313-cp313-macosx_14_0_arm64.whl", hash = "sha256:575420e01a50ebfa6afbbbc98266e45c01417925683f682de901808b343b6ae8"},
+    {file = "ta_lib-0.6.6-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:34389acdf0d1a566ae7aafe73f313c802a0760f8470a42e7461bf33da150f807"},
+    {file = "ta_lib-0.6.6-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:52bd61516e5162bb99adab6171f510c90ae569bc4247a19c7dd21e2b345266aa"},
+    {file = "ta_lib-0.6.6-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:677c5dc6e78851bf2bdd1fddb833f4d06550800f7cf826971530d5ff097563f0"},
+    {file = "ta_lib-0.6.6-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:5bff60c0a6d2a2b1eb045f2c0f3a946f7e000ee6c4d0992d7eb94a45bad3bd9c"},
+    {file = "ta_lib-0.6.6-cp313-cp313-win32.whl", hash = "sha256:b1fed90923ccfe9e0f0ea4cc4416aa137ccb6f70cf0ff890ac690398c3b35fe4"},
+    {file = "ta_lib-0.6.6-cp313-cp313-win_amd64.whl", hash = "sha256:7e29c4122683c20bd805ae01e1ff470175b7c504be903cb0727cb63705f08d9b"},
+    {file = "ta_lib-0.6.6-cp313-cp313-win_arm64.whl", hash = "sha256:dc23ac8f062548f16a958dc8a53a098a75263e14437db438ad1759921ac1a7ed"},
+    {file = "ta_lib-0.6.6-cp39-cp39-macosx_13_0_x86_64.whl", hash = "sha256:c2c14004a3c2cb38f8e71b89c713f16365d0a9cf6ee16d3d3500a3a737717095"},
+    {file = "ta_lib-0.6.6-cp39-cp39-macosx_14_0_arm64.whl", hash = "sha256:33e411d3b3f320a2c8d6cc7bea296d33792c9430a8b258ec2a8353723d6c22fe"},
+    {file = "ta_lib-0.6.6-cp39-cp39-manylinux_2_28_aarch64.whl", hash = "sha256:c57156b10c1764710f750143376bbb9c93edc8d37defdd9bc8a24aaf2a38d2a3"},
+    {file = "ta_lib-0.6.6-cp39-cp39-manylinux_2_28_x86_64.whl", hash = "sha256:fba0d0fbc6f13e6b2fdf5b7c2453036a0a4685edafe480c9d48a2d8f678ccb89"},
+    {file = "ta_lib-0.6.6-cp39-cp39-musllinux_1_2_aarch64.whl", hash = "sha256:caadc71f1557a667cda6359876ab190db56e038449b3314398aa84527f325ddc"},
+    {file = "ta_lib-0.6.6-cp39-cp39-musllinux_1_2_x86_64.whl", hash = "sha256:65cafeb773da4d296b175f839e29599c0119e0704ef8afc8b9b3c0dfcb2c6db3"},
+    {file = "ta_lib-0.6.6-cp39-cp39-win32.whl", hash = "sha256:50db36fe85b18dedd07686b6c86b4b2783701c8b66eff6d0b448ad197c266639"},
+    {file = "ta_lib-0.6.6-cp39-cp39-win_amd64.whl", hash = "sha256:6399e50b504e62afc6732d5504746c2e866472e1293394308a57d4c85c761314"},
+    {file = "ta_lib-0.6.6-cp39-cp39-win_arm64.whl", hash = "sha256:3d77fc4367cd36b0dc075a862a0c3a2df8b68ea5314c48e63c877fdec90cc848"},
+    {file = "ta_lib-0.6.6.tar.gz", hash = "sha256:ede8e1c2c442a86da5afafee116f60d949564ef7cb1113edea19779b487d8953"},
+]
+
+[package.dependencies]
+build = "*"
+numpy = "*"
+pip = "*"
+
+[[package]]
 name = "threadpoolctl"
 version = "3.6.0"
 description = "threadpoolctl"
@@ -2022,11 +2144,12 @@ version = "4.15.0"
 description = "Backported and Experimental Type Hints for Python 3.9+"
 optional = false
 python-versions = ">=3.9"
-groups = ["dev"]
+groups = ["main", "dev"]
 files = [
     {file = "typing_extensions-4.15.0-py3-none-any.whl", hash = "sha256:f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548"},
     {file = "typing_extensions-4.15.0.tar.gz", hash = "sha256:0cea48d173cc12fa28ecabc3b837ea3cf6f38c6d1136f85cbaaf598984861466"},
 ]
+markers = {main = "python_version == \"3.12\""}
 
 [[package]]
 name = "tzdata"
@@ -2288,5 +2411,5 @@ propcache = ">=0.2.1"
 
 [metadata]
 lock-version = "2.1"
-python-versions = ">=3.13"
-content-hash = "03c305d5989d45a938d414fba34a9482989edae1af93347e31013dfe94bc7560"
+python-versions = ">=3.12"
+content-hash = "4b04e27cd0c7e65769504e80b3e9ef711a7821600c7936c4839c1c724d54e76b"

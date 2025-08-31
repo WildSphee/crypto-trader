@@ -40,9 +40,7 @@ class Trade(HistoricalData):
 
     def set_price(self) -> str:
         # Fetch 500 most recent price
-        klines = client.get_klines(
-            symbol=self.symbol, interval=self.interval, limit=25
-        )
+        klines = client.get_klines(symbol=self.symbol, interval=self.interval, limit=25)
 
         self.recent_LOHCV = np.array(klines, dtype="d")
 

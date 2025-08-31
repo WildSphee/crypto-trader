@@ -5,9 +5,9 @@ from binance.enums import *
 
 import config
 
-print(config.api_key, config.api_secret, config.is_test_net)
-client = Client(config.api_key, config.api_secret, testnet=config.is_test_net)
+# client = Client(config.api_key, config.api_secret, testnet=config.is_test_net)
 client_query = Client(config.api_key, config.api_secret)
+client = Client(config.api_key, config.api_secret)
 
 
 # Change TA functions to setters instead of getters
