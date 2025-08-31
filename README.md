@@ -1,4 +1,4 @@
-# Algorithmic-Trading-Bot
+# cryto-trader
 
 ### Description
 
@@ -21,34 +21,23 @@ The bot initalizes historical data from 1 Jul, 2020 onwards and a logistic regre
 
 ### Binance Guide
 
-For Testnet, please follow this [guide](https://www.binance.com/en/support/faq/ab78f9a1b8824cf0a106b4229c76496d)
+For Testnet: [guide](https://www.binance.com/en/support/faq/ab78f9a1b8824cf0a106b4229c76496d)
 
-For Mainnet, please follow this [guide](https://www.binance.com/en/support/faq/360002502072)
+For Mainnet: [guide](https://www.binance.com/en/support/faq/360002502072)
 
-If you do not have a binance account, please consider registering with the link below.
-https://www.binance.com/en/activity/referral-entry/CPA?fromActivityPage=true&ref=CPA_00SB23W192
 
 ### Setup Guide
 ---
 Must have Python 3.9+ Installed.
-Libraries Required:
-- numpy
-- pandas
-- sklearn
-- [talib](https://github.com/mrjbq7/ta-lib)
-- [python-binance](https://github.com/sammchardy/python-binance)
 
 ```
-#If you're using macOS
-
-git clone https://github.com/mangofarmergoose/Algorithmic-Trading-Bot
-cd Algorithmic-Trading-Bot
-
-pip3 install numpy
-pip3 install pandas
-pip3 install sklearn
-
-python3 bot.py #To run the bot
+python3 -m venv venv
+source venv/bin/activate
+pip install poetry
+poetry install
+```
+```
+python3 bot.py
 ```
 For talib and python-binance, please follow the original documentations linked above.
 Installing these libraries should be trivial regardless of platforms.
@@ -58,11 +47,10 @@ Installing these libraries should be trivial regardless of platforms.
 
 ### Configuration
 ---
-Open config.py.
-- api_key = "your_api_key"
-- api_secret = "your_api_secret_key"
-- isTestNet = True/False
-- trade_interval = "5m" or "15m" or "1h"
+BINANCE_API_KEY = ""
+BINANCE_API_SECRET = ""
+BINANCE_API_INTERVAL = "1h"
+TESTNET = True/False
 ---
 
 ### Trading Panel
@@ -72,13 +60,3 @@ Open config.py.
 
 Note: Depending on which interval you select, the time of "Appending Historical Data" might differ. Give the process some time as the datasets are huge.
 
-### Donation
----
-
-Consider donating to support my development!
-
-![Monero](./img/monero.png)
-
-496vLRikTNdCZacbP8KFd2fjB7bC2Ms5Djp9GpQXhqcBGZHtUXrYBMV6SFR5PqV1pPKsveSv7LAevdhhDPMPx4y4PjM9xXd
-
----

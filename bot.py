@@ -15,7 +15,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
 import config
-from historical_data import HistoricalData
+from historical_data import HistoricalData, client
 
 
 class Trade(HistoricalData):
@@ -40,7 +40,7 @@ class Trade(HistoricalData):
 
     def set_price(self) -> str:
         # Fetch 500 most recent price
-        klines = HistoricalData.client.get_klines(
+        klines = client.get_klines(
             symbol=self.symbol, interval=self.interval, limit=25
         )
 
@@ -192,7 +192,7 @@ class Trade(HistoricalData):
 
     def SetQuantity(self):
         curr_price: float = self.close_arr[-1]
-        usdt_balance: float = float(HistoricalData.client.get_asset_balance(asset="USDT")["free"])
+        usdt_balance: float = float(client.get_asset_balance(asset="USDT")["free"])
         updown_change: float = 0.003
 
         # Kelly's criteriation
@@ -211,12 +211,12 @@ class Trade(HistoricalData):
         )
 
     def long(self, sym, size):
-        order = HistoricalData.client.order_market_buy(symbol=sym, quantity=size)
+        order = client.order_market_buy(symbol=sym, quantity=size)
 
         return order
 
     def short(self, sym, size):
-        order = HistoricalData.client.order_market_sell(symbol=sym, quantity=size)
+        order = client.order_market_sell(symbol=sym, quantity=size)
 
         return order
 
@@ -264,8 +264,8 @@ def main():
 
     now = int(get_now_timestamp()) * 1000
 
-    usdt_balance = HistoricalData.client.get_asset_balance(asset="USDT")
-    btc_balance = HistoricalData.client.get_asset_balance(asset="BTC")
+    usdt_balance = client.get_asset_balance(asset="USDT")
+    btc_balance = client.get_asset_balance(asset="BTC")
     print("\n", "Your Balance: ", usdt_balance, btc_balance, "\n")
     last_quantity: float = trade.quantity
 
@@ -312,8 +312,8 @@ def main():
 
                 print("Long", order)
 
-                usdt_balance = HistoricalData.client.get_asset_balance(asset="USDT")
-                btc_balance = HistoricalData.client.get_asset_balance(asset="BTC")
+                usdt_balance = client.get_asset_balance(asset="USDT")
+                btc_balance = client.get_asset_balance(asset="BTC")
                 print("\n", "Your Balance: ", usdt_balance, btc_balance, "\n")
 
                 # dont do Long
@@ -330,8 +330,8 @@ def main():
                 order = trade.short(trade.symbol, last_quantity)
                 print("Close Long", order)
 
-                usdt_balance = HistoricalData.client.get_asset_balance(asset="USDT")
-                btc_balance = HistoricalData.client.get_asset_balance(asset="BTC")
+                usdt_balance = client.get_asset_balance(asset="USDT")
+                btc_balance = client.get_asset_balance(asset="BTC")
                 print("\n", "Your Balance: ", usdt_balance, btc_balance, "\n")
 
             time.sleep(1)
@@ -355,14 +355,11 @@ def main():
                 order = trade.long(trade.symbol, trade.quantity)
                 print("Long", order)
 
-                usdt_balance = HistoricalData.client.get_asset_balance(asset="USDT")
-                btc_balance = HistoricalData.client.get_asset_balance(asset="BTC")
+                usdt_balance = client.get_asset_balance(asset="USDT")
+                btc_balance = client.get_asset_balance(asset="BTC")
                 print(usdt_balance, btc_balance)
 
             dealtime += delta
             print("Time for next Trade: ", convertTimestamp(dealtime), "\n")
 
             time.sleep(1)
-
-
-main()
