@@ -115,8 +115,27 @@ class HistoryManager:
             "CLOSEL1",
             "CLOSEL2",
             "CLOSEL3",
-            "PATT_3OUT",  # binary pattern
-            "PATT_CMB",  # binary pattern
+            "PATT_3OUT",
+            "PATT_CMB",
+            "RSI",
+            "MACD",
+            "MACD_SIGNAL",
+            "MACD_HIST",
+            "ADX",
+            "ATR",
+            "NATR",
+            "BB_UPPER",
+            "BB_MIDDLE",
+            "BB_LOWER",
+            "BB_WIDTH",
+            "OBV",
+            "MFI",
+            "AD",
+            "ADOSC",
+            "STOCH_K",
+            "STOCH_D",
+            "TRIX",
+            "ROC",
         ]
 
     # ---------- Data Fetch ----------
@@ -160,47 +179,81 @@ class HistoryManager:
     # ---------- Features ----------
 
     def _recompute_features(self) -> None:
-        """
-        Compute indicators, patterns and target with a consistent alignment.
-        Target UP_DOWN = 1 if next close > current close (shift(-1)), else 0.
-        Drop NaNs from indicator warmups and the last unlabeled row.
-        """
         df = self.df_ohlcv.copy()
 
-        # Technical indicators
+        # --- basic series ---
         close = df["close"].to_numpy(dtype=float)
         high = df["high"].to_numpy(dtype=float)
         low = df["low"].to_numpy(dtype=float)
+        openp = df["open"].to_numpy(dtype=float)
+        vol = df["volume"].to_numpy(dtype=float)
 
+        # --- your existing indicators ---
         ema = talib.EMA(close, timeperiod=self.timelag)
         cmo = talib.CMO(close, timeperiod=self.timelag)
         minusdm = talib.MINUS_DM(high, low, timeperiod=self.timelag)
         plusdm = talib.PLUS_DM(high, low, timeperiod=self.timelag)
 
-        patt_3out_raw = talib.CDL3OUTSIDE(
-            df["open"].to_numpy(dtype=float),
-            high,
-            low,
-            close,
-        )
-        patt_cmb_raw = talib.CDLCLOSINGMARUBOZU(
-            df["open"].to_numpy(dtype=float),
-            high,
-            low,
-            close,
-        )
-
+        patt_3out_raw = talib.CDL3OUTSIDE(openp, high, low, close)
+        patt_cmb_raw = talib.CDLCLOSINGMARUBOZU(openp, high, low, close)
         patt_3out = _bin_pattern_to_binary(patt_3out_raw)
         patt_cmb = _bin_pattern_to_binary(patt_cmb_raw)
 
-        # shifts
+        # --- lags ---
         closel1 = df["close"].shift(1)
         closel2 = df["close"].shift(2)
         closel3 = df["close"].shift(3)
 
-        # assemble feature table
+        # --- NEW: TA-Lib indicators (periods mostly = timelag) ---
+        # Momentum
+        rsi = talib.RSI(close, timeperiod=self.timelag)
+        macd, macd_sig, macd_hist = talib.MACD(
+            close, fastperiod=12, slowperiod=26, signalperiod=9
+        )
+        adx = talib.ADX(high, low, close, timeperiod=self.timelag)
+        trix = talib.TRIX(close, timeperiod=self.timelag)  # triple smoothed ROC
+        roc = talib.ROC(close, timeperiod=self.timelag)  # simple ROC
+
+        # Volatility
+        atr = talib.ATR(high, low, close, timeperiod=self.timelag)
+        natr = talib.NATR(
+            high, low, close, timeperiod=self.timelag
+        )  # normalized ATR (%)
+        bb_upper, bb_middle, bb_lower = talib.BBANDS(
+            close, timeperiod=self.timelag, nbdevup=2, nbdevdn=2, matype=0
+        )
+        bb_width = np.divide(
+            bb_upper - bb_lower,
+            bb_middle,
+            out=np.full_like(bb_middle, np.nan, dtype=float),
+            where=(bb_middle != 0) & ~np.isnan(bb_middle)
+        )
+
+        # Volume/flow
+        obv = talib.OBV(close, vol)
+        mfi = talib.MFI(high, low, close, vol, timeperiod=self.timelag)
+        ad = talib.AD(high, low, close, vol)  # Chaikin Acc/Dist line
+        adosc = talib.ADOSC(high, low, close, vol, fastperiod=3, slowperiod=10)
+
+        # Stochastics (defaults are classic 14,3,3; here tie to timelag)
+        # If timelag < 3, clip to safe minimums to avoid warnings
+        k_period = max(int(self.timelag), 5)
+        d_period = 3
+        stoch_k, stoch_d = talib.STOCH(
+            high,
+            low,
+            close,
+            fastk_period=k_period,
+            slowk_period=d_period,
+            slowk_matype=0,
+            slowd_period=d_period,
+            slowd_matype=0,
+        )
+
+        # --- assemble feature table ---
         feat = pd.DataFrame(
             {
+                # existing
                 "EMA": ema,
                 "CMO": cmo,
                 "MINUSDM": minusdm,
@@ -211,16 +264,38 @@ class HistoryManager:
                 "CLOSEL3": closel3,
                 "PATT_3OUT": patt_3out,
                 "PATT_CMB": patt_cmb,
+                # new
+                "RSI": rsi,
+                "MACD": macd,
+                "MACD_SIGNAL": macd_sig,
+                "MACD_HIST": macd_hist,
+                "ADX": adx,
+                "ATR": atr,
+                "NATR": natr,
+                "BB_UPPER": bb_upper,
+                "BB_MIDDLE": bb_middle,
+                "BB_LOWER": bb_lower,
+                "BB_WIDTH": bb_width,
+                "OBV": obv,
+                "MFI": mfi,
+                "AD": ad,
+                "ADOSC": adosc,
+                "STOCH_K": stoch_k,
+                "STOCH_D": stoch_d,
+                "TRIX": trix,
+                "ROC": roc,
             },
             index=df.index,
         )
 
-        # target for *next* bar
+        # --- target for next bar ---
         up_down = (df["close"].shift(-1) > df["close"]).astype("float64")
         feat["UP_DOWN"] = up_down
 
-        # drop warmup NaNs and unlabeled last row
-        feat = feat.dropna().astype({"UP_DOWN": "int64"})
+        # --- clean up ---
+        feat = feat.replace([np.inf, -np.inf], np.nan).dropna()
+        feat = feat.astype({"UP_DOWN": "int64"})
+
         self.df_features = feat
 
     # ---------- Accessors ----------

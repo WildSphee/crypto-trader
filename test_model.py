@@ -329,12 +329,12 @@ def main():
     p.add_argument("--symbol", default="BTCUSDT")
     p.add_argument(
         "--start-list",
-        default="120d,365d,730d,1100d",
+        default="120d,200d,365d,730d",
         help="Comma list of windows or absolute dates, e.g. '180d,365d,2021-01-01,90 days ago UTC'.",
     )
     p.add_argument(
         "--intervals",
-        default="15m,1h,4h,1d",
+        default="15m,30m,1h,4h",
         help="Comma list, e.g. '5m,15m,1h,4h,1d'.",
     )
     p.add_argument(
@@ -363,7 +363,7 @@ def main():
     p.add_argument("--save-predictions", action="store_true")
     p.add_argument("--threshold-sweep", default=None, help="e.g. '0.50:0.75:0.01'")
     p.add_argument("--fees-bps", type=float, default=10.0)
-    p.add_argument("--slippage-bps", type=float, default=0.0)
+    p.add_argument("--slippage-bps", type=float, default=2)
     args = p.parse_args()
 
     start_list = parse_start_list(args.start_list)
