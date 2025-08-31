@@ -20,7 +20,7 @@ from historical_data import HistoricalData, client
 
 class Trade(HistoricalData):
     def __init__(self, symbol, interval):
-        HistoricalData.__init__(self, symbol, interval)
+        HistoricalData.__init__(self, symbol, interval, config.start_str)
         self.optimal_ratio: float = 0.99
         self.quantity: float = 0.039
         self.predicted_up_prob = 0

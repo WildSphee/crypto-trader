@@ -12,7 +12,8 @@ client = Client(config.api_key, config.api_secret)
 
 # Change TA functions to setters instead of getters
 class HistoricalData:
-    def __init__(self, symbol, interval):
+    def __init__(self, symbol, interval, start_str: str):
+        self.start_str = start_str
         self.symbol = symbol
         self.interval = interval
         self.arr = np.array([], dtype="d")
@@ -40,7 +41,7 @@ class HistoricalData:
 
     def InitAllHistoricalData(self):
         test = client_query.get_historical_klines(
-            symbol=self.symbol, interval=self.interval, start_str="1 Jul, 2020"
+            symbol=self.symbol, interval=self.interval, start_str=self.start_str
         )
         self.arr = np.array(test, dtype="d")
 
