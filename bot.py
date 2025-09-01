@@ -4,6 +4,7 @@ Key changes:
 - Reuses shared metrics/sweep code.
 - Uses the selected threshold when deciding to trade long-only.
 """
+
 from __future__ import annotations
 import time
 import numpy as np
@@ -41,7 +42,6 @@ def _map_trade_interval_to_binance(code: str) -> str:
     return _INTERVAL_MAP[code]
 
 
-from metrics import SweepConfig
 
 
 class TradeBot:
@@ -59,15 +59,32 @@ class TradeBot:
         fees_bps: float = None,
         slippage_bps: float = None,
     ) -> None:
-        trade_interval_code = trade_interval_code or getattr(config, "trade_interval", "5m")
+        trade_interval_code = trade_interval_code or getattr(
+            config, "trade_interval", "5m"
+        )
         start_str = start_str or getattr(config, "start_str", "60 days ago UTC")
         self.best_metric = best_metric or getattr(config, "best_metric", "sharpe_like")
         self.sweep_cfg = sweep_cfg or SweepConfig(
-            *tuple(map(float, (getattr(config, "threshold_sweep", "0.50:0.90:0.005").split(":"))))
+            *tuple(
+                map(
+                    float,
+                    (getattr(config, "threshold_sweep", "0.50:0.90:0.005").split(":")),
+                )
+            )
         )
-        self.calib_window_bars = int(getattr(config, "calib_window_bars", calib_window_bars))
-        self.fees_bps = float(getattr(config, "fees_bps", fees_bps if fees_bps is not None else 10.0))
-        self.slippage_bps = float(getattr(config, "slippage_bps", slippage_bps if slippage_bps is not None else 5.0))
+        self.calib_window_bars = int(
+            getattr(config, "calib_window_bars", calib_window_bars)
+        )
+        self.fees_bps = float(
+            getattr(config, "fees_bps", fees_bps if fees_bps is not None else 10.0)
+        )
+        self.slippage_bps = float(
+            getattr(
+                config,
+                "slippage_bps",
+                slippage_bps if slippage_bps is not None else 5.0,
+            )
+        )
 
         self.client = Client(
             getattr(config, "api_key", None),
@@ -89,7 +106,9 @@ class TradeBot:
             timelag=timelag,
         )
         self.model = ModelManager(predictor_cols=self.data.predictor_cols)
-        self.position = PositionManager(client=self.client, symbol=self.symbol, sizing=SizingConfig())
+        self.position = PositionManager(
+            client=self.client, symbol=self.symbol, sizing=SizingConfig()
+        )
 
         self._bars_since_retrain = 0
         self._current_threshold = 0.50  # fallback
@@ -107,7 +126,11 @@ class TradeBot:
 
         # build forward returns aligned to X
         fwd_ret = (
-            self.data.df_ohlcv["close"].pct_change().shift(-1).reindex(self.data.df_features.index).values
+            self.data.df_ohlcv["close"]
+            .pct_change()
+            .shift(-1)
+            .reindex(self.data.df_features.index)
+            .values
         )
         mask_ok = ~np.isnan(fwd_ret)
         p_all = p_all[mask_ok]
@@ -185,7 +208,9 @@ class TradeBot:
                         p_up = 0.5
 
                     p_down = 1.0 - p_up
-                    print(f"Predicted up/down: {p_up:.3f}/{p_down:.3f}  thr={self._current_threshold:.3f}")
+                    print(
+                        f"Predicted up/down: {p_up:.3f}/{p_down:.3f}  thr={self._current_threshold:.3f}"
+                    )
 
                     if p_up >= self._current_threshold:
                         qty = self.position.compute_quantity_kelly(p_up, last_price)
@@ -200,7 +225,9 @@ class TradeBot:
                     usdt_bal = self.client.get_asset_balance(asset="USDT")
                     base_asset = self.symbol.replace("USDT", "")
                     base_bal = self.client.get_asset_balance(asset=base_asset)
-                    print(f"Balances: USDT={usdt_bal['free']} {base_asset}={base_bal['free']}")
+                    print(
+                        f"Balances: USDT={usdt_bal['free']} {base_asset}={base_bal['free']}"
+                    )
                 except Exception as e:
                     print(f"[WARN] Balance fetch failed: {e}")
             try:

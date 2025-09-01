@@ -3,9 +3,10 @@
 Shared P&L and threshold-selection utilities so both test_model.py and
 bot.py can reuse the exact same logic.
 """
+
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional
+from typing import Dict
 import numpy as np
 
 
@@ -30,7 +31,9 @@ def bars_per_year_from_interval(interval_code: str) -> float:
     return (365.0 * 24.0 * 60.0) / m
 
 
-def one_bar_pnl(signal: np.ndarray, fwd_returns: np.ndarray, cost_per_roundtrip: float) -> np.ndarray:
+def one_bar_pnl(
+    signal: np.ndarray, fwd_returns: np.ndarray, cost_per_roundtrip: float
+) -> np.ndarray:
     """Long-only net P&L for each bar given 0/1 signals and next-bar returns.
     cost_per_roundtrip is cost for an enter+exit pair, applied on entry bars.
     """
@@ -51,7 +54,9 @@ def _stats_from_net(net: np.ndarray, signal: np.ndarray, interval_code: str) -> 
     trades = int(signal.sum())
     hit_rate = float((net[signal == 1] > 0).mean()) if trades > 0 else float("nan")
     avg_net_ret_per_bar = float(np.nanmean(net)) if net.size else 0.0
-    avg_net_ret_per_trade = float(np.nanmean(net[signal == 1])) if trades > 0 else float("nan")
+    avg_net_ret_per_trade = (
+        float(np.nanmean(net[signal == 1])) if trades > 0 else float("nan")
+    )
 
     eq = np.cumprod(1.0 + np.nan_to_num(net, nan=0.0))
     total_ret = float(eq[-1] - 1.0) if len(eq) else 0.0
@@ -106,4 +111,3 @@ def sweep_thresholds(
         return -np.inf if (val is None or np.isnan(val)) else val
 
     return max(candidates, key=keyfun)
-

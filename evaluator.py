@@ -1,9 +1,9 @@
 """
 Minimal evaluator you can import in test_model.py and bot.py to avoid duplication.
 """
-from typing import Dict, Optional, Tuple
+
+from typing import Dict
 import numpy as np
-import pandas as pd
 
 from metrics import SweepConfig, sweep_thresholds
 

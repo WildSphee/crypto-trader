@@ -226,7 +226,7 @@ class HistoryManager:
             bb_upper - bb_lower,
             bb_middle,
             out=np.full_like(bb_middle, np.nan, dtype=float),
-            where=(bb_middle != 0) & ~np.isnan(bb_middle)
+            where=(bb_middle != 0) & ~np.isnan(bb_middle),
         )
 
         # Volume/flow

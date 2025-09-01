@@ -34,10 +34,7 @@ from metrics import SweepConfig
 from evaluator import choose_best_threshold_for_window
 
 
-
 def map_interval(code: str) -> str:
-    from binance.client import Client
-
     m = {
         "1m": Client.KLINE_INTERVAL_1MINUTE,
         "3m": Client.KLINE_INTERVAL_3MINUTE,
@@ -90,9 +87,6 @@ def parse_start_list(arg: str) -> List[str]:
     return out
 
 
-# ---------- core eval ----------
-
-
 def evaluate_combo(
     symbol: str,
     start_str: str,
@@ -114,9 +108,11 @@ def evaluate_combo(
     client: Client,
 ) -> Dict:
     b_interval = map_interval(interval_code)
-    print(f"\n--- Interval {interval_code} / start {start_str} / model {model_name} ---")
+    print(
+        f"\n--- Interval {interval_code} / start {start_str} / model {model_name} ---"
+    )
 
-    # 1) Build features
+    # Fetch features
     data = HistoryManager(
         client=client,
         symbol=symbol,
@@ -125,9 +121,9 @@ def evaluate_combo(
         timelag=timelag,
     )
     data.load_history()
-    X, y_dir = data.dataset()  # default direction label from HistoryManager
+    X, y_dir = data.dataset()
 
-    # compute forward returns aligned to features
+    # forward returns
     fwd_ret = (
         data.df_ohlcv["close"]
         .pct_change()
@@ -136,7 +132,7 @@ def evaluate_combo(
         .values
     )
 
-    # optional label override: ret_gt_bps
+    # Use the label "ret_gt_bps" if you want to trade only over a certain return threshold
     if label_mode == "ret_gt_bps":
         thr = ret_bps / 10_000.0
         y = (fwd_ret > thr).astype(int)
@@ -319,14 +315,14 @@ def main():
     p.add_argument(
         "--label-mode",
         choices=["direction", "ret_gt_bps"],
-        default="direction",
+        default="ret_gt_bps",
         help="Use 'ret_gt_bps' to define UP only when next-bar return > --ret-bps.",
     )
     p.add_argument(
         "--ret-bps",
         type=float,
-        default=0.0,
-        help="Return threshold in bps for 'ret_gt_bps' mode.",
+        default=30.0,
+        help="Return threshold in bps for 'ret_gt_bps' mode. 30 as the predicted round trip cost is 30",
     )
     p.add_argument("--out-dir", default="backtest_output")
     p.add_argument("--save-datasets", action="store_true")
@@ -351,12 +347,13 @@ def main():
     start_list = parse_start_list(args.start_list)
     intervals = [s.strip() for s in args.intervals.split(",") if s.strip()]
     models = [m.strip() for m in args.models.split(",") if m.strip()]
-    sweep_cfg = parse_sweep(args.threshold_sweep) if args.threshold_sweep else SweepConfig()
+    sweep_cfg = (
+        parse_sweep(args.threshold_sweep) if args.threshold_sweep else SweepConfig()
+    )
     class_weight = None if args.class_weight == "none" else "balanced"
 
     ensure_dirs(args.out_dir)
 
-    # IMPORTANT: use MAINNET for data
     client = Client(
         getattr(config, "api_key", None),
         getattr(config, "api_secret", None),
@@ -402,7 +399,6 @@ def main():
         )
         df.to_csv(out_path, index=False)
         print("\nSummary written to:", out_path)
-        # print a compact view
         cols = [
             "start_str",
             "interval",
