@@ -72,7 +72,7 @@ class PositionManager:
         Returns (free_usdt, free_base) balances.
         """
         usdt = float(self.client.get_asset_balance(asset="USDT")["free"])
-        # base asset is the quote's base part of the symbol (e.g., BTC in BTCUSDT)
+        # base asset (e.g., BTC in BTCUSDT)
         base_asset = self.symbol.replace("USDT", "")
         base = float(self.client.get_asset_balance(asset=base_asset)["free"])
         return usdt, base

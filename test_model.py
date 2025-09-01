@@ -292,7 +292,7 @@ def main():
     p = argparse.ArgumentParser(
         description="Grid-validate models over intervals * start_strs * models."
     )
-    p.add_argument("--symbol", default="BTCUSDT")
+    p.add_argument("--symbol", default="ETHUSDT")
     p.add_argument(
         "--start-list",
         default="120d,365d,730d",
