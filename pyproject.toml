@@ -6,7 +6,7 @@ authors = [
     {name = "Reagan",email = "rrr.chanhiulok@gmail.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<4"
 dependencies = [
     "numpy (>=2.3.2,<3.0.0)",
     "pandas (>=2.3.2,<3.0.0)",
@@ -16,7 +16,12 @@ dependencies = [
     "ipykernel (>=6.30.1,<7.0.0)",
     "ta-lib (>=0.6.6,<0.7.0)",
     "python-dotenv (>=1.1.1,<2.0.0)",
-    "pytest (>=8.4.1,<9.0.0)"
+    "pytest (>=8.4.1,<9.0.0)",
+    "xgboost (>=3.0.4,<4.0.0)",
+    "lightgbm (>=4.6.0,<5.0.0)",
+    "catboost (>=1.2.8,<2.0.0)",
+    "tensorflow (>=2.20.0,<3.0.0)",
+    "scikeras (>=0.13.0,<0.14.0)"
 ]
 
 
