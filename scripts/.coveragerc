@@ -1,0 +1,8 @@
+[run]
+omit = app/tests/*
+
+[html]
+show_contexts = True
+
+[report]
+sort = Cover

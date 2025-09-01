@@ -1,11 +1,13 @@
-# test_models.py
+# test_model.py
 # ------------------------------------------------------------
 # Grid validator across intervals × start_strs × models.
 # - time-based or random split
 # - optional label mode: 'direction' or 'ret_gt_bps'
-# - threshold P&L sweep (fees/slippage)
-# - CSV exports
+# - threshold sweep (fees/slippage-aware) with shared metrics code
+# - CSV exports for datasets, predictions, and summary
 # ------------------------------------------------------------
+
+from __future__ import annotations
 
 import argparse
 import os
@@ -25,10 +27,12 @@ from sklearn.metrics import (
 )
 
 import config
-from history_manager import HistoryManager
-from model_manager import ModelManager
+from managers.history_manager import HistoryManager
+from managers.model_manager import ModelManager
 
-# ---------- helpers ----------
+from metrics import SweepConfig
+from evaluator import choose_best_threshold_for_window
+
 
 
 def map_interval(code: str) -> str:
@@ -55,7 +59,7 @@ def map_interval(code: str) -> str:
 
 def ensure_dirs(path: str) -> None:
     os.makedirs(path, exist_ok=True)
-    for sub in ["datasets", "metrics", "predictions", "thresholds"]:
+    for sub in ["datasets", "metrics", "predictions"]:
         os.makedirs(os.path.join(path, sub), exist_ok=True)
 
 
@@ -66,13 +70,13 @@ def time_split_indices(n_rows: int, test_frac: float) -> Tuple[np.ndarray, np.nd
     return idx[:train_len], idx[train_len:]
 
 
-def parse_sweep(arg: str) -> Tuple[float, float, float]:
+def parse_sweep(arg: str) -> SweepConfig:
     a, b, c = map(float, arg.split(":"))
     if not (0.0 <= a < b <= 1.0) or c <= 0:
         raise ValueError(
             "threshold sweep must be 'start:stop:step' with 0<=start<stop<=1 and step>0"
         )
-    return a, b, c
+    return SweepConfig(start=a, stop=b, step=c)
 
 
 def parse_start_list(arg: str) -> List[str]:
@@ -84,33 +88,6 @@ def parse_start_list(arg: str) -> List[str]:
         else:
             out.append(token)
     return out
-
-
-def bars_per_year_from_interval(interval_code: str) -> float:
-    minutes_map = {
-        "1m": 1,
-        "3m": 3,
-        "5m": 5,
-        "15m": 15,
-        "30m": 30,
-        "1h": 60,
-        "2h": 120,
-        "4h": 240,
-        "6h": 360,
-        "8h": 480,
-        "12h": 720,
-        "1d": 24 * 60,
-    }
-    m = minutes_map[interval_code]
-    return (365.0 * 24.0 * 60.0) / m
-
-
-def one_bar_pnl(
-    signal: np.ndarray, fwd_returns: np.ndarray, cost_per_roundtrip: float
-) -> np.ndarray:
-    gross = signal * fwd_returns
-    net = gross - signal * cost_per_roundtrip
-    return net
 
 
 # ---------- core eval ----------
@@ -128,17 +105,16 @@ def evaluate_combo(
     out_dir: str,
     save_datasets: bool,
     save_predictions: bool,
-    threshold_sweep: Optional[Tuple[float, float, float]],
+    sweep_cfg: SweepConfig,
     fees_bps: float,
     slippage_bps: float,
     label_mode: str,
     ret_bps: float,
+    best_metric: str,
     client: Client,
 ) -> Dict:
     b_interval = map_interval(interval_code)
-    print(
-        f"\n--- Interval {interval_code} / start {start_str} / model {model_name} ---"
-    )
+    print(f"\n--- Interval {interval_code} / start {start_str} / model {model_name} ---")
 
     # 1) Build features
     data = HistoryManager(
@@ -151,7 +127,7 @@ def evaluate_combo(
     data.load_history()
     X, y_dir = data.dataset()  # default direction label from HistoryManager
 
-    # optional label override: ret_gt_bps
+    # compute forward returns aligned to features
     fwd_ret = (
         data.df_ohlcv["close"]
         .pct_change()
@@ -159,10 +135,11 @@ def evaluate_combo(
         .reindex(data.df_features.index)
         .values
     )
+
+    # optional label override: ret_gt_bps
     if label_mode == "ret_gt_bps":
         thr = ret_bps / 10_000.0
         y = (fwd_ret > thr).astype(int)
-        # remove any NaNs alignments just in case
         mask_ok = ~np.isnan(fwd_ret)
         X, y, fwd_ret = X[mask_ok], y[mask_ok], fwd_ret[mask_ok]
     else:
@@ -184,7 +161,8 @@ def evaluate_combo(
         # Train internally with random split to get a fair test accuracy
         test_acc = model.train(X, pd.Series(y))
         pipe = model.pipeline
-        # For sweep/report, we’ll compute probs on the entire set (reference)
+
+        # reference probs for whole set; metrics computed on this ref set
         p_up_all = pipe.predict_proba(X)[:, 1]
         y_pred_all = (p_up_all >= 0.5).astype(int)
 
@@ -196,9 +174,11 @@ def evaluate_combo(
             auc = roc_auc_score(y, p_up_all)
         except Exception:
             auc = float("nan")
+
         cm = confusion_matrix(y, y_pred_all).tolist()
 
-        test_mask = np.ones(n, dtype=bool)  # not the true random holdout
+        # For sweep/report, treat the whole series as "test"
+        test_mask = np.ones(n, dtype=bool)
         p_up_test, y_test, fwd_test = p_up_all, y, fwd_ret
     else:
         idx_train, idx_test = time_split_indices(n, test_size)
@@ -246,12 +226,22 @@ def evaluate_combo(
     if save_predictions:
         pred_df = pd.DataFrame(
             {
-                "is_test": test_mask.astype(int),
-                "p_up": np.where(test_mask, p_up_test, np.nan),
-                "y_true": np.where(test_mask, y_test, np.nan),
-                "fwd_ret": np.where(test_mask, fwd_test, np.nan),
+                "is_test": np.where(test_mask, 1, 0),
+                "p_up": np.nan,  # default NaN for non-test
+                "y_true": np.nan,
+                "fwd_ret": np.nan,
             }
         )
+        # fill only test rows
+        if split_mode == "random":
+            pred_df.loc[:, "p_up"] = p_up_test
+            pred_df.loc[:, "y_true"] = y_test
+            pred_df.loc[:, "fwd_ret"] = fwd_test
+        else:
+            pred_df.loc[test_mask, "p_up"] = p_up_test
+            pred_df.loc[test_mask, "y_true"] = y_test
+            pred_df.loc[test_mask, "fwd_ret"] = fwd_test
+
         pred_df.to_csv(
             os.path.join(
                 out_dir, "predictions", f"PRED_{start_str.replace(' ', '_')}_{tag}.csv"
@@ -259,50 +249,18 @@ def evaluate_combo(
             index=False,
         )
 
-    cost_rt = 2.0 * ((fees_bps + slippage_bps) / 10_000.0)
-    best_metric = "sharpe_like"  # or "total_net_return" / "avg_net_ret_per_bar"
+    # 4) Threshold sweep using shared code (fees/slippage aware)
+    best = choose_best_threshold_for_window(
+        p_up_window=p_up_test,
+        fwd_ret_window=fwd_test,
+        interval_code=interval_code,
+        fees_bps=fees_bps,
+        slippage_bps=slippage_bps,
+        sweep=sweep_cfg,
+        best_metric=best_metric,
+    )
 
-    def _pnl_for_threshold(thr_val: float):
-        signal = (p_up_test >= thr_val).astype(int)
-        # net returns per test bar (nan-safe stats)
-        net = signal * fwd_test - signal * cost_rt
-
-        trades = int(signal.sum())
-        hit_rate = float((net[signal == 1] > 0).mean()) if trades > 0 else float("nan")
-        avg_net_ret_per_bar   = float(np.nanmean(net)) if trades > 0 else 0.0
-        avg_net_ret_per_trade = float(np.nanmean(net[signal == 1])) if trades > 0 else float("nan")
-
-        eq = np.cumprod(1.0 + np.nan_to_num(net, nan=0.0))
-        total_ret = float(eq[-1] - 1.0) if len(eq) else 0.0
-
-        mu = np.nanmean(net) if trades > 1 else 0.0
-        sd = np.nanstd(net, ddof=1) if trades > 1 else 0.0
-        bpy = bars_per_year_from_interval(interval_code)
-        sharpe = float((mu / sd) * np.sqrt(bpy)) if sd > 0 else float("nan")
-
-        return {
-            "threshold": float(thr_val),
-            "trades": trades,
-            "hit_rate": hit_rate,
-            "avg_net_ret_per_bar": avg_net_ret_per_bar,
-            "avg_net_ret_per_trade": avg_net_ret_per_trade,
-            "total_net_return": total_ret,
-            "sharpe_like": sharpe,
-        }
-
-    best = None
-    if threshold_sweep:
-        a, b, step = threshold_sweep
-        thresholds = np.round(np.arange(a, b + 1e-12, step), 6)
-        # evaluate & pick best
-        candidates = [_pnl_for_threshold(th) for th in thresholds]
-        if candidates:
-            best = max(candidates, key=lambda r: (-np.inf if np.isnan(r[best_metric]) else r[best_metric]))
-    else:
-        # no sweep provided → evaluate at 0.50 so summary still has P&L
-        best = _pnl_for_threshold(0.50)
-
-    # 5) Summary row (now includes best-threshold P&L)
+    # 5) Summary row (includes best-threshold P&L)
     return {
         "symbol": symbol,
         "interval": interval_code,
@@ -321,16 +279,16 @@ def evaluate_combo(
         "f1": float(f1),
         "auc": float(auc),
         "confusion_matrix": cm,
-        # best threshold & money metrics (no separate thresholds file)
-        "best_threshold": float(best["threshold"]) if best else 0.50,
-        "trades": int(best["trades"]) if best else 0,
-        "hit_rate": float(best["hit_rate"]) if best else float("nan"),
-        "avg_net_ret_per_bar": float(best["avg_net_ret_per_bar"]) if best else 0.0,
-        "avg_net_ret_per_trade": float(best["avg_net_ret_per_trade"]) if best else float("nan"),
-        "total_net_return": float(best["total_net_return"]) if best else 0.0,
-        "sharpe_like": float(best["sharpe_like"]) if best else float("nan"),
+        # best threshold & money metrics
+        "best_threshold": float(best.get("threshold", 0.50)),
+        "trades": int(best.get("trades", 0)),
+        "hit_rate": float(best.get("hit_rate", float("nan"))),
+        "avg_net_ret_per_bar": float(best.get("avg_net_ret_per_bar", 0.0)),
+        "avg_net_ret_per_trade": float(best.get("avg_net_ret_per_trade", float("nan"))),
+        "total_net_return": float(best.get("total_net_return", 0.0)),
+        "sharpe_like": float(best.get("sharpe_like", float("nan"))),
         # for sanity/reference
-        "cost_roundtrip": float(cost_rt),
+        "cost_roundtrip": float(2.0 * ((fees_bps + slippage_bps) / 10_000.0)),
     }
 
 
@@ -373,15 +331,27 @@ def main():
     p.add_argument("--out-dir", default="backtest_output")
     p.add_argument("--save-datasets", action="store_true")
     p.add_argument("--save-predictions", action="store_true")
-    p.add_argument("--threshold-sweep", default="0.50:0.75:0.01", help="start:stop:step for p_up threshold, e.g. '0.50:0.75:0.01'")
+
+    # shared sweep/metrics knobs
+    p.add_argument(
+        "--threshold-sweep",
+        default="0.50:0.90:0.005",
+        help="start:stop:step for p_up threshold, e.g. '0.50:0.75:0.01'",
+    )
+    p.add_argument(
+        "--best-metric",
+        choices=["sharpe_like", "total_net_return", "avg_net_ret_per_bar"],
+        default="sharpe_like",
+    )
     p.add_argument("--fees-bps", type=float, default=10.0)
-    p.add_argument("--slippage-bps", type=float, default=5)
+    p.add_argument("--slippage-bps", type=float, default=5.0)
+
     args = p.parse_args()
 
     start_list = parse_start_list(args.start_list)
     intervals = [s.strip() for s in args.intervals.split(",") if s.strip()]
     models = [m.strip() for m in args.models.split(",") if m.strip()]
-    thr = parse_sweep(args.threshold_sweep) if args.threshold_sweep else None
+    sweep_cfg = parse_sweep(args.threshold_sweep) if args.threshold_sweep else SweepConfig()
     class_weight = None if args.class_weight == "none" else "balanced"
 
     ensure_dirs(args.out_dir)
@@ -410,11 +380,12 @@ def main():
                         out_dir=args.out_dir,
                         save_datasets=args.save_datasets,
                         save_predictions=args.save_predictions,
-                        threshold_sweep=thr,
+                        sweep_cfg=sweep_cfg,
                         fees_bps=args.fees_bps,
                         slippage_bps=args.slippage_bps,
                         label_mode=args.label_mode,
                         ret_bps=args.ret_bps,
+                        best_metric=args.best_metric,
                         client=client,
                     )
                     results.append(res)
@@ -431,22 +402,24 @@ def main():
         )
         df.to_csv(out_path, index=False)
         print("\nSummary written to:", out_path)
-        print(
-            df[
-                [
-                    "start_str",
-                    "interval",
-                    "model",
-                    "rows",
-                    "accuracy",
-                    "precision",
-                    "recall",
-                    "f1",
-                    "auc",
-                    "thresholds_file",
-                ]
-            ]
-        )
+        # print a compact view
+        cols = [
+            "start_str",
+            "interval",
+            "model",
+            "rows",
+            "accuracy",
+            "precision",
+            "recall",
+            "f1",
+            "auc",
+            "best_threshold",
+            "trades",
+            "sharpe_like",
+            "avg_net_ret_per_bar",
+            "total_net_return",
+        ]
+        print(df[cols])
     else:
         print("No successful evaluations.")
 
