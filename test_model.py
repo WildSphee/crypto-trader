@@ -30,8 +30,8 @@ import config
 from managers.history_manager import HistoryManager
 from managers.model_manager import ModelManager
 
-from metrics import SweepConfig
-from evaluator import choose_best_threshold_for_window
+from evaluations.metrics import SweepConfig
+from evaluations.evaluator import choose_best_threshold_for_window
 
 
 def map_interval(code: str) -> str:

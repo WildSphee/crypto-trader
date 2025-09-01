@@ -2,7 +2,7 @@ import math
 import numpy as np
 import pytest
 
-from metrics import (
+from evaluations.metrics import (
     bars_per_year_from_interval,
     one_bar_pnl,
     evaluate_threshold,

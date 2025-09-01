@@ -232,3 +232,7 @@ pytest -q
 **How do I run only one combo quickly?**  Use a single start, interval, model, and a shorter `start_str` (e.g., `30d`) while iterating.
 
 **Can I use other assets?**  Yes: `--symbol ETHUSDT` etc. Ensure symbol filters exist and liquidity is sufficient.
+
+## License
+
+Privated under <Reagan Chan> rrr.chanhiulok@gmail.com

@@ -6,17 +6,13 @@ from typing import Optional, Tuple
 
 from binance.client import Client
 
-# from binance.enums import *
-
 
 @dataclass
 class SizingConfig:
     # Assumed typical bar move used for a naive Kelly fraction denominator
     typical_bar_return: float = 0.003  # 0.3%
     kelly_cap: float = 0.20  # max fraction of capital to risk
-    min_notional_usdt: float = (
-        5.0  # Binance min notional (example; check symbol filters)
-    )
+    min_notional_usdt: float = 5.0   # Binance min notional (example; check symbol filters)
 
 
 class PositionManager:
@@ -93,7 +89,6 @@ class PositionManager:
         qty = dollar_alloc / last_price
         return self._round_qty(qty)
 
-    # ---------- Orders ----------
 
     def open_long(self, qty: float) -> Optional[dict]:
         if qty <= 0:

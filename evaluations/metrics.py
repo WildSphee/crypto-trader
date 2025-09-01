@@ -1,4 +1,3 @@
-# metrics.py
 """
 Shared P&L and threshold-selection utilities so both test_model.py and
 bot.py can reuse the exact same logic.

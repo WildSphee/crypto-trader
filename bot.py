@@ -15,8 +15,8 @@ import config
 from managers.history_manager import INTERVAL_TO_MS, HistoryManager
 from managers.model_manager import ModelManager
 from managers.position_manager import PositionManager, SizingConfig
-from evaluator import choose_best_threshold_for_window
-from metrics import SweepConfig
+from evaluations.evaluator import choose_best_threshold_for_window
+from evaluations.metrics import SweepConfig
 
 
 # mapping kept as-is from your original bot

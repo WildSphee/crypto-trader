@@ -1,6 +1,6 @@
 import numpy as np
-from evaluator import choose_best_threshold_for_window
-from metrics import SweepConfig
+from evaluations.evaluator import choose_best_threshold_for_window
+from evaluations.metrics import SweepConfig
 
 
 def test_choose_best_threshold_for_window_end_to_end():

@@ -5,7 +5,7 @@ Minimal evaluator you can import in test_model.py and bot.py to avoid duplicatio
 from typing import Dict
 import numpy as np
 
-from metrics import SweepConfig, sweep_thresholds
+from evaluations.metrics import SweepConfig, sweep_thresholds
 
 
 def choose_best_threshold_for_window(
