@@ -33,6 +33,9 @@ from managers.model_manager import ModelManager
 
 from evaluations.metrics import SweepConfig
 from evaluations.evaluator import choose_best_threshold_for_window
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="tensorflow")
+warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
 
 
 def map_interval(code: str) -> str:
