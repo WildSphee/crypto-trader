@@ -17,6 +17,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from binance.client import Client
+from numpy.lib.stride_tricks import sliding_window_view
 from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
@@ -52,6 +53,18 @@ def map_interval(code: str) -> str:
     if code not in m:
         raise ValueError(f"Unsupported interval code: {code}")
     return m[code]
+
+
+def make_windows_from_df(
+    df: pd.DataFrame, feat_cols: list[str], window: int, stride: int = 1
+) -> np.ndarray:
+    arr = df[feat_cols].to_numpy(dtype=np.float32, copy=False)
+    if len(arr) < window:
+        return np.empty((0, window, arr.shape[1]), dtype=np.float32)
+    sw = sliding_window_view(
+        arr, window_shape=window, axis=0
+    )  # (T-window+1, window, d)
+    return sw[::stride]  # stride=1 -> fully overlapping
 
 
 def ensure_dirs(path: str) -> None:
@@ -141,7 +154,31 @@ def evaluate_combo(
     else:
         y = y_dir.values
 
-    n = len(X)
+    seq_models = {"bilstm", "gru_lstm", "hybrid_transformer"}
+    use_sequence = model_name in seq_models
+
+    if use_sequence:
+        window = max(2, timelag)
+        stride = 1  # fully overlapping
+        feat_cols = list(X.columns)
+        X_seq = make_windows_from_df(
+            data.df_features, feat_cols, window=window, stride=stride
+        )
+        n_seq = len(X_seq)
+        if n_seq == 0:
+            raise RuntimeError(
+                f"Not enough rows ({len(X)}) to form any {window}-length windows."
+            )
+
+        idx_last = (window - 1) + np.arange(n_seq) * stride
+        y = np.asarray(y)[idx_last]
+        fwd_ret = fwd_ret[idx_last]
+
+        X_nd = X_seq
+    else:
+        X_nd = X
+
+    n = len(X_nd)
     if n < 200:
         print(f"[WARN] Only {n} rows; results may be noisy.")
 
@@ -151,15 +188,17 @@ def evaluate_combo(
         model_name=model_name,
         class_weight=class_weight,
         random_state=1,
+        input_kind="sequence" if use_sequence else "tabular",
+        sequence_maker=None,
     )
 
     if split_mode == "random":
         # Train internally with random split to get a fair test accuracy
-        test_acc = model.train(X, pd.Series(y))
+        test_acc = model.train(X_nd, pd.Series(y))
         pipe = model.pipeline
 
         # reference probs for whole set; metrics computed on this ref set
-        p_up_all = pipe.predict_proba(X)[:, 1]
+        p_up_all = pipe.predict_proba(X_nd)[:, 1]
         y_pred_all = (p_up_all >= 0.5).astype(int)
 
         acc = test_acc
@@ -176,10 +215,17 @@ def evaluate_combo(
         # For sweep/report, treat the whole series as "test"
         test_mask = np.ones(n, dtype=bool)
         p_up_test, y_test, fwd_test = p_up_all, y, fwd_ret
-    else:
+
+    else:  # time split
         idx_train, idx_test = time_split_indices(n, test_size)
-        X_train, y_train = X.iloc[idx_train], y[idx_train]
-        X_test, y_test = X.iloc[idx_test], y[idx_test]
+        X_train, y_train = (
+            (X_nd[idx_train] if use_sequence else X.iloc[idx_train]),
+            y[idx_train],
+        )
+        X_test, y_test = (
+            (X_nd[idx_test] if use_sequence else X.iloc[idx_test]),
+            y[idx_test],
+        )
 
         model.pipeline = model._build_pipeline()
         model.pipeline.fit(X_train, y_train)
@@ -295,20 +341,20 @@ def main():
     p.add_argument("--symbol", default="ETHUSDT")
     p.add_argument(
         "--start-list",
-        default="120d,365d,730d",
+        default="365d,720d",
         help="Comma list of windows or absolute dates, e.g. '180d,365d,2021-01-01,90 days ago UTC'.",
     )
     p.add_argument(
         "--intervals",
-        default="30m,1h,2h,4h",
+        default="1h,4h",
         help="Comma list, e.g. '5m,15m,1h,4h,1d'.",
     )
     p.add_argument(
         "--models",
-        default="logreg,hgb,rf,hgb,linsvc,sgdlog",
-        help="Comma list: logreg,sgdlog,rf,hgb,linsvc",
+        default="logreg,rf,hgb,linsvc,bilstm,gru_lstm,hybrid_transformer,voting_soft,stacking,metalabel",
+        help="Comma list: logreg,sgdlog,rf,hgb,linsvc,bilstm,gru_lstm,hybrid_transformer,voting_soft,stacking,metalabel",
     )
-    p.add_argument("--timelag", type=int, default=20)
+    p.add_argument("--timelag", type=int, default=16)
     p.add_argument("--split-mode", choices=["time", "random"], default="time")
     p.add_argument("--test-size", type=float, default=0.2)
     p.add_argument("--class-weight", choices=["balanced", "none"], default="none")

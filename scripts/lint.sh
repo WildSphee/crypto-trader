@@ -18,12 +18,12 @@ fi
 echo $FPATH
 echo $check
 
-if "$check"; then
-  ruff format $FPATH --check
-  mypy $FPATH
-  ruff check $FPATH
+if [ "$check" = true ]; then
+  ruff format "$FPATH" --check
+  mypy "$FPATH"
+  ruff check "$FPATH"
 else
-  ruff format $FPATH
-  ruff check $FPATH --fix
-  ruff check $FPATH --select I --fix
+  ruff format "$FPATH"
+  ruff check "$FPATH" --fix
+  ruff check "$FPATH" --select I --fix
 fi
