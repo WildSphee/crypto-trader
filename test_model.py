@@ -6,9 +6,6 @@
 # - threshold sweep (fees/slippage-aware) with shared metrics code
 # - CSV exports for datasets, predictions, and summary
 # ------------------------------------------------------------
-
-from __future__ import annotations
-
 import argparse
 import os
 import time
@@ -341,7 +338,7 @@ def main():
     p = argparse.ArgumentParser(
         description="Grid-validate models over intervals * start_strs * models."
     )
-    p.add_argument("--symbol", default="ETHUSDT")
+    p.add_argument("--symbol", default="BTCUSDT")
     p.add_argument(
         "--start-list",
         default="365d,720d",
@@ -364,13 +361,13 @@ def main():
     p.add_argument(
         "--label-mode",
         choices=["direction", "ret_gt_bps"],
-        default="ret_gt_bps",
+        default="direction",
         help="Use 'ret_gt_bps' to define UP only when next-bar return > --ret-bps.",
     )
     p.add_argument(
         "--ret-bps",
         type=float,
-        default=30.0,
+        default=0.0,
         help="Return threshold in bps for 'ret_gt_bps' mode. 30 as the predicted round trip cost is 30",
     )
     p.add_argument("--out-dir", default="backtest_output")

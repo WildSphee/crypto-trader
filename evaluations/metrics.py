@@ -3,7 +3,6 @@ Shared P&L and threshold-selection utilities so both test_model.py and
 bot.py can reuse the exact same logic.
 """
 
-from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict
 import numpy as np
