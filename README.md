@@ -235,4 +235,4 @@ pytest -q
 
 ## License
 
-Privated under <Reagan Chan> rrr.chanhiulok@gmail.com
+Privated under Reagan Chan rrr.chanhiulok@gmail.com
