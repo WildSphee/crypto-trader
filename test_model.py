@@ -61,7 +61,7 @@ def make_windows_from_df(
 
 def ensure_dirs(path: str) -> None:
     os.makedirs(path, exist_ok=True)
-    for sub in ["metrics"]: 
+    for sub in ["metrics", "datasets", "predictions"]: 
         os.makedirs(os.path.join(path, sub), exist_ok=True)
 
 

@@ -3,13 +3,19 @@
 # - Computes indicators (EMA, CMO, +DM, -DM) and candlestick patterns
 # - Builds a clean features DataFrame with a next-bar target (UP_DOWN)
 # - Updates with the latest closed bar and exposes prediction features
+# - Merges Fear & Greed features and BTC on-chain smoothed features
 
-from typing import Tuple
+from typing import Tuple, Optional, Dict, Any, List
 
 import numpy as np
 import pandas as pd
 import talib
 from binance.client import Client
+
+# --- add imports for your feature modules (adjust paths/names if needed) ---
+# If your files are named differently, just update these two lines.
+from features.fear_index import get_fng_features
+from features.on_chain_data import get_btc_onchain_smoothed
 
 INTERVAL_TO_MS = {
     Client.KLINE_INTERVAL_1MINUTE: 60_000,
@@ -24,6 +30,22 @@ INTERVAL_TO_MS = {
     Client.KLINE_INTERVAL_8HOUR: 8 * 60 * 60_000,
     Client.KLINE_INTERVAL_12HOUR: 12 * 60 * 60_000,
     Client.KLINE_INTERVAL_1DAY: 24 * 60 * 60_000,
+}
+
+# Map Binance constants to the string codes expected by the two feature modules
+_BINANCE_CONST_TO_CODE = {
+    Client.KLINE_INTERVAL_1MINUTE: "1m",
+    Client.KLINE_INTERVAL_3MINUTE: "3m",
+    Client.KLINE_INTERVAL_5MINUTE: "5m",
+    Client.KLINE_INTERVAL_15MINUTE: "15m",
+    Client.KLINE_INTERVAL_30MINUTE: "30m",
+    Client.KLINE_INTERVAL_1HOUR: "1h",
+    Client.KLINE_INTERVAL_2HOUR: "2h",
+    Client.KLINE_INTERVAL_4HOUR: "4h",
+    Client.KLINE_INTERVAL_6HOUR: "6h",
+    Client.KLINE_INTERVAL_8HOUR: "8h",
+    Client.KLINE_INTERVAL_12HOUR: "12h",
+    Client.KLINE_INTERVAL_1DAY: "1d",
 }
 
 
@@ -70,13 +92,13 @@ def _bin_pattern_to_binary(arr: np.ndarray) -> np.ndarray:
     TA-Lib candlestick functions return -100, 0, +100.
     Map strictly positive to 1, else 0 (so -100 and 0 => 0).
     """
-    # sign(positive) -> 1; sign(0 or negative) -> 0
     return (np.sign(arr) > 0).astype(np.int32)
 
 
 class HistoryManager:
     """
     Manages historical and latest market data, indicators, and features.
+    Now optionally merges Fear & Greed features and BTC on-chain smoothed features.
     """
 
     def __init__(
@@ -86,6 +108,11 @@ class HistoryManager:
         interval: str,
         start_str: str,
         timelag: int = 20,
+        *,
+        include_fng: bool = True,
+        fng_kwargs: Optional[Dict[str, Any]] = None,
+        include_onchain: bool = True,
+        onchain_kwargs: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.client = client
         self.symbol = symbol
@@ -98,12 +125,17 @@ class HistoryManager:
 
         self.interval_ms = INTERVAL_TO_MS[interval]
 
+        self.include_fng = include_fng
+        self.fng_kwargs = fng_kwargs or {}
+        self.include_onchain = include_onchain
+        self.onchain_kwargs = onchain_kwargs or {}
+
         # core OHLCV data
         self.df_ohlcv: pd.DataFrame = pd.DataFrame()
         # full modeling table (features + label)
         self.df_features: pd.DataFrame = pd.DataFrame()
 
-        # List of predictor column names (fixed order)
+        # List of predictor column names (fixed order; we may append new ones dynamically)
         self.predictor_cols = [
             "EMA",
             "CMO",
@@ -202,7 +234,7 @@ class HistoryManager:
         closel2 = df["close"].shift(2)
         closel3 = df["close"].shift(3)
 
-        # --- NEW: TA-Lib indicators (periods mostly = timelag) ---
+        # --- TA-Lib indicators (periods mostly = timelag) ---
         # Momentum
         rsi = talib.RSI(close, timeperiod=self.timelag)
         macd, macd_sig, macd_hist = talib.MACD(
@@ -214,9 +246,7 @@ class HistoryManager:
 
         # Volatility
         atr = talib.ATR(high, low, close, timeperiod=self.timelag)
-        natr = talib.NATR(
-            high, low, close, timeperiod=self.timelag
-        )  # normalized ATR (%)
+        natr = talib.NATR(high, low, close, timeperiod=self.timelag)  # normalized ATR (%)
         bb_upper, bb_middle, bb_lower = talib.BBANDS(
             close, timeperiod=self.timelag, nbdevup=2, nbdevdn=2, matype=0
         )
@@ -234,7 +264,6 @@ class HistoryManager:
         adosc = talib.ADOSC(high, low, close, vol, fastperiod=3, slowperiod=10)
 
         # Stochastics (defaults are classic 14,3,3; here tie to timelag)
-        # If timelag < 3, clip to safe minimums to avoid warnings
         k_period = max(int(self.timelag), 5)
         d_period = 3
         stoch_k, stoch_d = talib.STOCH(
@@ -248,7 +277,7 @@ class HistoryManager:
             slowd_matype=0,
         )
 
-        # --- assemble feature table ---
+        # --- assemble base feature table (index preserved) ---
         feat = pd.DataFrame(
             {
                 # existing
@@ -286,6 +315,53 @@ class HistoryManager:
             index=df.index,
         )
 
+        ts_utc = pd.to_datetime(df["open_time"], unit="ms", utc=True)
+        start_iso = ts_utc.iloc[0].isoformat()
+        end_iso = ts_utc.iloc[-1].isoformat()
+        code_iv = _BINANCE_CONST_TO_CODE[self.interval]
+
+        base_cols: set = set(feat.columns)
+        appended_cols: List[str] = []
+
+        # Fear & Greed
+        if self.include_fng:
+            try:
+                fng_df = get_fng_features(
+                    start=start_iso,
+                    end=end_iso,
+                    interval=code_iv,
+                    **self.fng_kwargs,
+                )
+                if not fng_df.empty:
+                    # keep only numeric columns (drop the string label)
+                    fng_num = fng_df.select_dtypes(include=[np.number])
+                    if not fng_num.empty:
+                        fng_aligned = fng_num.reindex(ts_utc, method="ffill")
+                        fng_aligned.index = feat.index
+                        feat = feat.join(fng_aligned, how="left")
+                        appended_cols.extend(list(fng_aligned.columns))
+            except Exception:
+                pass
+
+
+        # On-chain (BTC)
+        if self.include_onchain:
+            try:
+                oc_df = get_btc_onchain_smoothed(
+                    start=start_iso,
+                    end=end_iso,
+                    interval=code_iv,
+                    **self.onchain_kwargs,
+                )
+                if not oc_df.empty:
+                    oc_aligned = oc_df.reindex(ts_utc, method="ffill")
+                    oc_aligned.index = feat.index
+                    feat = feat.join(oc_aligned, how="left")
+                    appended_cols.extend([c for c in oc_aligned.columns])
+            except Exception:
+                # Fail safe: skip on-chain if anything goes wrong
+                pass
+
         # --- target for next bar ---
         up_down = (df["close"].shift(-1) > df["close"]).astype("float64")
         feat["UP_DOWN"] = up_down
@@ -293,6 +369,19 @@ class HistoryManager:
         # --- clean up ---
         feat = feat.replace([np.inf, -np.inf], np.nan).dropna()
         feat = feat.astype({"UP_DOWN": "int64"})
+
+        # Expand predictor list with any newly appended columns (keep original order first)
+        if appended_cols:
+            new_cols = [c for c in feat.columns if c not in base_cols and c != "UP_DOWN"]
+            for c in new_cols:
+                if pd.api.types.is_numeric_dtype(feat[c]):
+                    if c not in self.predictor_cols:
+                        self.predictor_cols.append(c)
+
+        # belt & suspenders: drop any non-numeric columns that snuck in
+        _non_numeric = feat.select_dtypes(exclude=[np.number]).columns.tolist()
+        if _non_numeric:
+            feat = feat.drop(columns=_non_numeric)
 
         self.df_features = feat
 
@@ -303,7 +392,6 @@ class HistoryManager:
         Returns the open_time ms of the last CLOSED bar in df_features.
         (df_features has dropped the last unlabeled row, so last row is safely closed)
         """
-        # map index back to base ohlcv
         last_idx = self.df_features.index[-1]
         return int(self.df_ohlcv.loc[last_idx, "open_time"])
 

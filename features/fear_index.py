@@ -33,13 +33,13 @@ _CODE_TO_PANDAS_FREQ = {
     "5m": "5min",
     "15m": "15min",
     "30m": "30min",
-    "1h": "1H",
-    "2h": "2H",
-    "4h": "4H",
-    "6h": "6H",
-    "8h": "8H",
-    "12h": "12H",
-    "1d": "1D",
+    "1h": "1h",
+    "2h": "2h",
+    "4h": "4h",
+    "6h": "6h",
+    "8h": "8h",
+    "12h": "12h",
+    "1d": "1d",
 }
 SUPPORTED_INTERVALS = set(_CODE_TO_PANDAS_FREQ.keys())
 

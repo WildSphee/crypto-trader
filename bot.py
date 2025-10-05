@@ -112,15 +112,11 @@ class TradeBot:
             start_str=start_str,
             timelag=timelag,
         )
+
         self.model_name = model_name or getattr(config, "model_name", "hgb")
         self.seq_models = {"bilstm", "gru_lstm", "hybrid_transformer"}
         self.use_sequence = self.model_name in self.seq_models
         self.window = max(2, timelag)
-        self.model = ModelManager(
-            predictor_cols=self.data.predictor_cols,
-            model_name=self.model_name,
-            input_kind="sequence" if self.use_sequence else "tabular",
-        )
         self.position = PositionManager(
             client=self.client, symbol=self.symbol, sizing=SizingConfig()
         )
@@ -190,6 +186,11 @@ class TradeBot:
         print("Loading historical data...")
         self.data.load_history()
         X, y = self.data.dataset()
+        self.model = ModelManager(
+            predictor_cols=self.data.predictor_cols,
+            model_name=self.model_name,
+            input_kind="sequence" if self.use_sequence else "tabular",
+        )
         print(f"Dataset ready: {len(X)} rows, {len(self.data.predictor_cols)} features")
         if self.use_sequence:
             feat_cols = list(X.columns)
