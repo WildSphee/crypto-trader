@@ -1,6 +1,14 @@
+# environment
 venv
-.env
 
+# cache
 __pycache__
 .ruff_cache
 .mypy_cache
+
+# backtests
+backtest_output/datasets/*.csv
+backtest_output/predictions/*.csv
+
+# credentials
+.env
