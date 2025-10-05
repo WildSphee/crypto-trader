@@ -14,6 +14,7 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
     roc_auc_score,
+    mean_absolute_error,
 )
 
 import config
@@ -22,12 +23,16 @@ from managers.model_manager import ModelManager
 
 from evaluations.metrics import SweepConfig
 from evaluations.evaluator import choose_best_threshold_for_window
+
 import warnings
+
 warnings.filterwarnings("ignore", category=UserWarning, module="tensorflow")
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
 
 
 def map_interval(code: str) -> str:
+    from binance.client import Client
+
     m = {
         "1m": Client.KLINE_INTERVAL_1MINUTE,
         "3m": Client.KLINE_INTERVAL_3MINUTE,
@@ -53,15 +58,13 @@ def make_windows_from_df(
     arr = df[feat_cols].to_numpy(dtype=np.float32, copy=False)
     if len(arr) < window:
         return np.empty((0, window, arr.shape[1]), dtype=np.float32)
-    sw = sliding_window_view(
-        arr, window_shape=window, axis=0
-    )  # (T-window+1, window, d)
-    return sw[::stride]  # stride=1 -> fully overlapping
+    sw = sliding_window_view(arr, window_shape=window, axis=0)
+    return sw[::stride]
 
 
 def ensure_dirs(path: str) -> None:
     os.makedirs(path, exist_ok=True)
-    for sub in ["metrics", "datasets", "predictions"]: 
+    for sub in ["metrics", "datasets", "predictions"]:
         os.makedirs(os.path.join(path, sub), exist_ok=True)
 
 
@@ -82,7 +85,6 @@ def parse_sweep(arg: str) -> SweepConfig:
 
 
 def parse_start_list(arg: str) -> List[str]:
-    # allow "365d,720d,2021-01-01,90 days ago UTC"
     out = []
     for token in [s.strip() for s in arg.split(",") if s.strip()]:
         if token.lower().endswith("d") and token[:-1].isdigit():
@@ -90,6 +92,57 @@ def parse_start_list(arg: str) -> List[str]:
         else:
             out.append(token)
     return out
+
+
+def sweep_on_predicted_return(
+    yhat_bps: np.ndarray,
+    fwd_ret_bps: np.ndarray,
+    cost_bps: float,
+    best_metric: str,
+    thr_grid_bps: np.ndarray | None = None,
+) -> Dict:
+    """
+    Long-only: trade when predicted return >= (threshold + cost).
+    Metrics are net of costs (bps).
+    """
+    if thr_grid_bps is None:
+        thr_grid_bps = np.arange(0.0, 60.1, 1.0)  # 0..60 bps
+
+    best = {"threshold": 0.0, "total_net_return": float("-inf")}
+    for thr in thr_grid_bps:
+        take = yhat_bps >= (thr + cost_bps)
+        trades = int(take.sum())
+        if trades == 0:
+            continue
+        net = fwd_ret_bps[take] - cost_bps
+        total = float(np.nansum(net))
+        avg = float(np.nanmean(net))
+        std = float(np.nanstd(net))
+        sharpe_like = float(avg / (std + 1e-9))
+        metric = {
+            "total_net_return": total,
+            "avg_net_ret_per_bar": avg,
+            "sharpe_like": sharpe_like,
+        }[best_metric]
+        if metric > best.get(best_metric, float("-inf")):
+            best = {
+                "threshold": float(thr),
+                "trades": trades,
+                "total_net_return": total,
+                "avg_net_ret_per_bar": avg,
+                "sharpe_like": sharpe_like,
+            }
+    if best["total_net_return"] == float("-inf"):
+        best.update(
+            {
+                "threshold": 0.0,
+                "trades": 0,
+                "total_net_return": 0.0,
+                "avg_net_ret_per_bar": float("nan"),
+                "sharpe_like": float("nan"),
+            }
+        )
+    return best
 
 
 def evaluate_combo(
@@ -111,24 +164,148 @@ def evaluate_combo(
     ret_bps: float,
     best_metric: str,
     client: Client,
+    task: str,
 ) -> Dict:
     b_interval = map_interval(interval_code)
     print(
-        f"\n--- Interval {interval_code} / start {start_str} / model {model_name} ---"
+        f"\n--- Interval {interval_code} / start {start_str} / model {model_name} / task {task} ---"
     )
 
-    # Fetch features
     data = HistoryManager(
         client=client,
         symbol=symbol,
         interval=b_interval,
         start_str=start_str,
         timelag=timelag,
+        # HistoryManager defaults include FNG/on-chain already enabled
     )
     data.load_history()
-    X, y_dir = data.dataset()
 
-    # forward returns
+    # ================= REGRESSION PATH =================
+    if task == "regress":
+        # Predict next-bar return in bps
+        X, y_ret = data.dataset(target="return_bps")
+
+        # map common classifier names to sensible regressors if provided
+        reg_name_map = {
+            "hgb": "hgb_reg",
+            "rf": "rf_reg",
+            "logreg": "linreg",
+            "sgdlog": "linreg",
+            "linsvc": "svr",
+            "voting_soft": "hgb_reg",
+            "stacking": "hgb_reg",
+            "metalabel": "hgb_reg",
+            # allow native reg names, too
+            "hgb_reg": "hgb_reg",
+            "rf_reg": "rf_reg",
+            "linreg": "linreg",
+            "svr": "svr",
+        }
+        reg_model_name = reg_name_map.get(model_name, "hgb_reg")
+
+        model = ModelManager(
+            predictor_cols=list(X.columns),
+            model_name=reg_model_name,
+            input_kind="tabular",
+            task="regress",
+        )
+
+        # time split and fit ONLY on train
+        n = len(X)
+        idx_train, idx_test = time_split_indices(n, test_size)
+        X_train, y_train = X.iloc[idx_train], y_ret.iloc[idx_train]
+        X_test, y_test = X.iloc[idx_test], y_ret.iloc[idx_test]
+
+        model.pipeline = model._build_pipeline_reg()
+        model.pipeline.fit(X_train, y_train)
+        yhat_test = model.pipeline.predict(X_test)
+
+        from sklearn.metrics import r2_score
+
+        r2 = float(r2_score(y_test, yhat_test))
+
+        cost_bps = 2.0 * (fees_bps + slippage_bps)
+        best = sweep_on_predicted_return(
+            yhat_bps=np.asarray(yhat_test, dtype=float),
+            fwd_ret_bps=np.asarray(y_test, dtype=float),
+            cost_bps=cost_bps,
+            best_metric=best_metric,
+        )
+
+        # artifacts
+        ts_tag = time.strftime("%Y%m%d_%H%M%S")
+        tag = f"{symbol}_{interval_code}_{reg_model_name}_{ts_tag}"
+        if save_datasets:
+            os.makedirs(os.path.join(out_dir, "datasets"), exist_ok=True)
+            data.df_ohlcv.to_csv(
+                os.path.join(
+                    out_dir,
+                    "datasets",
+                    f"OHLCV_{start_str.replace(' ', '_')}_{tag}.csv",
+                ),
+                index=False,
+            )
+            data.df_features.to_csv(
+                os.path.join(
+                    out_dir,
+                    "datasets",
+                    f"FEATURES_{start_str.replace(' ', '_')}_{tag}.csv",
+                ),
+                index=True,
+            )
+        if save_predictions:
+            os.makedirs(os.path.join(out_dir, "predictions"), exist_ok=True)
+            pred_df = pd.DataFrame(
+                {"p_up": np.nan, "y_true": np.nan, "fwd_ret": np.nan}
+            )
+            pred_df.loc[: len(yhat_test) - 1, "fwd_ret"] = y_test.values
+            pred_df.loc[: len(yhat_test) - 1, "p_up"] = (
+                yhat_test  # store predicted return in 'p_up' slot for convenience
+            )
+            pred_df.to_csv(
+                os.path.join(
+                    out_dir,
+                    "predictions",
+                    f"PRED_{start_str.replace(' ', '_')}_{tag}.csv",
+                ),
+                index=False,
+            )
+
+        return {
+            "symbol": symbol,
+            "interval": interval_code,
+            "start_str": start_str,
+            "timelag": timelag,
+            "model": reg_model_name,
+            "rows": n,
+            "split_mode": split_mode,
+            "test_size": test_size,
+            "class_weight": "",
+            "label_mode": "return_bps",
+            "ret_bps": 0.0,
+            "accuracy": float("nan"),
+            "precision": float("nan"),
+            "recall": float("nan"),
+            "f1": float("nan"),
+            "auc": float("nan"),
+            "confusion_matrix": [],
+            "best_threshold": float(best.get("threshold", 0.0)),
+            "trades": int(best.get("trades", 0)),
+            "hit_rate": float("nan"),
+            "avg_net_ret_per_bar": float(best.get("avg_net_ret_per_bar", 0.0)),
+            "avg_net_ret_per_trade": float("nan"),
+            "total_net_return": float(best.get("total_net_return", 0.0)),
+            "sharpe_like": float(best.get("sharpe_like", float("nan"))),
+            "cost_roundtrip": float(2.0 * ((fees_bps + slippage_bps) / 10_000.0)),
+            "r2": float(r2),
+            "mae_bps": float(mean_absolute_error(y_test, yhat_test)),
+        }
+
+    # ================= CLASSIFICATION PATH (original) =================
+    X, y_dir = data.dataset(target="direction")
+
+    # forward returns aligned with features (for money metrics)
     fwd_ret = (
         data.df_ohlcv["close"]
         .pct_change()
@@ -137,7 +314,6 @@ def evaluate_combo(
         .values
     )
 
-    # Use the label "ret_gt_bps" if you want to trade only over a certain return threshold
     if label_mode == "ret_gt_bps":
         thr = ret_bps / 10_000.0
         y = (fwd_ret > thr).astype(int)
@@ -151,7 +327,7 @@ def evaluate_combo(
 
     if use_sequence:
         window = max(2, timelag)
-        stride = 1  # fully overlapping
+        stride = 1
         feat_cols = list(X.columns)
         X_seq = make_windows_from_df(
             data.df_features, feat_cols, window=window, stride=stride
@@ -165,7 +341,6 @@ def evaluate_combo(
         idx_last = (window - 1) + np.arange(n_seq) * stride
         y = np.asarray(y)[idx_last]
         fwd_ret = fwd_ret[idx_last]
-
         X_nd = X_seq
     else:
         X_nd = X
@@ -174,7 +349,6 @@ def evaluate_combo(
     if n < 200:
         print(f"[WARN] Only {n} rows; results may be noisy.")
 
-    # 2) Fit/Eval
     model = ModelManager(
         predictor_cols=list(X.columns),
         model_name=model_name,
@@ -182,14 +356,12 @@ def evaluate_combo(
         random_state=1,
         input_kind="sequence" if use_sequence else "tabular",
         sequence_maker=None,
+        task="classify",
     )
 
     if split_mode == "random":
-        # Train internally with random split to get a fair test accuracy
         test_acc = model.train(X_nd, pd.Series(y))
         pipe = model.pipeline
-
-        # reference probs for whole set; metrics computed on this ref set
         p_up_all = pipe.predict_proba(X_nd)[:, 1]
         y_pred_all = (p_up_all >= 0.5).astype(int)
 
@@ -201,26 +373,22 @@ def evaluate_combo(
             auc = roc_auc_score(y, p_up_all)
         except Exception:
             auc = float("nan")
-
         cm = confusion_matrix(y, y_pred_all).tolist()
 
-        # For sweep/report, treat the whole series as "test"
         test_mask = np.ones(n, dtype=bool)
         p_up_test, y_test, fwd_test = p_up_all, y, fwd_ret
 
     else:  # time split
         idx_train, idx_test = time_split_indices(n, test_size)
-        X_train, y_train = (
-            (X_nd[idx_train] if use_sequence else X.iloc[idx_train]),
-            y[idx_train],
-        )
         X_test, y_test = (
             (X_nd[idx_test] if use_sequence else X.iloc[idx_test]),
             y[idx_test],
         )
 
-        model.pipeline = model._build_pipeline()
-        model.pipeline.fit(X_train, y_train)
+        model.pipeline = model._build_pipeline_clf()
+        model.pipeline.fit(
+            X_nd[idx_train] if use_sequence else X.iloc[idx_train], y[idx_train]
+        )
 
         p_up_test = model.pipeline.predict_proba(X_test)[:, 1]
         y_pred = (p_up_test >= 0.5).astype(int)
@@ -239,18 +407,32 @@ def evaluate_combo(
         test_mask[idx_test] = True
         fwd_test = fwd_ret[idx_test]
 
-    # 3) Save artifacts
+    # threshold sweep (probability) w/ costs
+    best = choose_best_threshold_for_window(
+        p_up_window=p_up_test,
+        fwd_ret_window=fwd_test,
+        interval_code=interval_code,
+        fees_bps=fees_bps,
+        slippage_bps=slippage_bps,
+        sweep=sweep_cfg,
+        best_metric=best_metric,
+    )
+
+    # artifacts
     ts_tag = time.strftime("%Y%m%d_%H%M%S")
     tag = f"{symbol}_{interval_code}_{model_name}_{ts_tag}"
 
     if save_datasets:
-        data.df_ohlcv.to_csv(
+        os.makedirs(os.path.join(out_dir, "datasets"), exist_ok=True)
+        HistoryManager_df_ohlcv = data.df_ohlcv.copy()
+        HistoryManager_df_features = data.df_features.copy()
+        HistoryManager_df_ohlcv.to_csv(
             os.path.join(
                 out_dir, "datasets", f"OHLCV_{start_str.replace(' ', '_')}_{tag}.csv"
             ),
             index=False,
         )
-        data.df_features.to_csv(
+        HistoryManager_df_features.to_csv(
             os.path.join(
                 out_dir, "datasets", f"FEATURES_{start_str.replace(' ', '_')}_{tag}.csv"
             ),
@@ -258,15 +440,15 @@ def evaluate_combo(
         )
 
     if save_predictions:
+        os.makedirs(os.path.join(out_dir, "predictions"), exist_ok=True)
         pred_df = pd.DataFrame(
             {
                 "is_test": np.where(test_mask, 1, 0),
-                "p_up": np.nan,  # default NaN for non-test
+                "p_up": np.nan,
                 "y_true": np.nan,
                 "fwd_ret": np.nan,
             }
         )
-        # fill only test rows
         if split_mode == "random":
             pred_df.loc[:, "p_up"] = p_up_test
             pred_df.loc[:, "y_true"] = y_test
@@ -283,25 +465,13 @@ def evaluate_combo(
             index=False,
         )
 
-    # 4) Threshold sweep using shared code (fees/slippage aware)
-    best = choose_best_threshold_for_window(
-        p_up_window=p_up_test,
-        fwd_ret_window=fwd_test,
-        interval_code=interval_code,
-        fees_bps=fees_bps,
-        slippage_bps=slippage_bps,
-        sweep=sweep_cfg,
-        best_metric=best_metric,
-    )
-
-    # 5) Summary row (includes best-threshold P&L)
     return {
         "symbol": symbol,
         "interval": interval_code,
         "start_str": start_str,
         "timelag": timelag,
         "model": model_name,
-        "rows": n,
+        "rows": len(X_nd),
         "split_mode": split_mode,
         "test_size": test_size,
         "class_weight": class_weight or "",
@@ -313,7 +483,6 @@ def evaluate_combo(
         "f1": float(f1),
         "auc": float(auc),
         "confusion_matrix": cm,
-        # best threshold & money metrics
         "best_threshold": float(best.get("threshold", 0.50)),
         "trades": int(best.get("trades", 0)),
         "hit_rate": float(best.get("hit_rate", float("nan"))),
@@ -321,8 +490,9 @@ def evaluate_combo(
         "avg_net_ret_per_trade": float(best.get("avg_net_ret_per_trade", float("nan"))),
         "total_net_return": float(best.get("total_net_return", 0.0)),
         "sharpe_like": float(best.get("sharpe_like", float("nan"))),
-        # for sanity/reference
         "cost_roundtrip": float(2.0 * ((fees_bps + slippage_bps) / 10_000.0)),
+        "r2": float("nan"),
+        "mae_bps": float("nan"),
     }
 
 
@@ -337,40 +507,33 @@ def main():
         help="Comma list of windows or absolute dates, e.g. '180d,365d,2021-01-01,90 days ago UTC'.",
     )
     p.add_argument(
-        "--intervals",
-        default="1h,4h",
-        help="Comma list, e.g. '5m,15m,1h,4h,1d'.",
+        "--intervals", default="1h,4h", help="Comma list, e.g. '5m,15m,1h,4h,1d'."
     )
     p.add_argument(
         "--models",
         default="logreg,rf,hgb,linsvc,bilstm,gru_lstm,hybrid_transformer,voting_soft,stacking,metalabel",
-        help="Comma list: logreg,sgdlog,rf,hgb,linsvc,bilstm,gru_lstm,hybrid_transformer,voting_soft,stacking,metalabel",
+        help="Comma list for classification; for regression you can still pass these and they map to regressors.",
     )
     p.add_argument("--timelag", type=int, default=16)
     p.add_argument("--split-mode", choices=["time", "random"], default="time")
     p.add_argument("--test-size", type=float, default=0.2)
     p.add_argument("--class-weight", choices=["balanced", "none"], default="none")
     p.add_argument(
-        "--label-mode",
-        choices=["direction", "ret_gt_bps"],
-        default="direction",
-        help="Use 'ret_gt_bps' to define UP only when next-bar return > --ret-bps.",
+        "--label-mode", choices=["direction", "ret_gt_bps"], default="direction"
     )
     p.add_argument(
         "--ret-bps",
         type=float,
         default=0.0,
-        help="Return threshold in bps for 'ret_gt_bps' mode. 30 as the predicted round trip cost is 30",
+        help="Return threshold in bps for 'ret_gt_bps' mode.",
     )
     p.add_argument("--out-dir", default="backtest_output")
     p.add_argument("--save-datasets", action="store_true")
     p.add_argument("--save-predictions", action="store_true")
-
-    # shared sweep/metrics knobs
     p.add_argument(
         "--threshold-sweep",
         default="0.50:0.90:0.005",
-        help="start:stop:step for p_up threshold, e.g. '0.50:0.75:0.01'",
+        help="start:stop:step for p_up threshold",
     )
     p.add_argument(
         "--best-metric",
@@ -378,7 +541,8 @@ def main():
         default="sharpe_like",
     )
     p.add_argument("--fees-bps", type=float, default=10.0)
-    p.add_argument("--slippage-bps", type=float, default=5.0)
+    p.add_argument("--slippage-bps", type=float, default=3.0)
+    p.add_argument("--task", choices=["classify", "regress"], default="regress")
 
     args = p.parse_args()
 
@@ -422,6 +586,7 @@ def main():
                         ret_bps=args.ret_bps,
                         best_metric=args.best_metric,
                         client=client,
+                        task=args.task,
                     )
                     results.append(res)
                 except Exception as e:
@@ -437,22 +602,24 @@ def main():
         )
         df.to_csv(out_path, index=False)
         print("\nSummary written to:", out_path)
+
+        # print a compact view that works for both tasks
         cols = [
             "start_str",
             "interval",
             "model",
             "rows",
             "accuracy",
-            "precision",
-            "recall",
-            "f1",
-            "auc",
-            "best_threshold",
-            "trades",
-            "sharpe_like",
+            "r2",
             "avg_net_ret_per_bar",
             "total_net_return",
+            "sharpe_like",
+            "best_threshold",
+            "trades",
         ]
+        for c in cols:
+            if c not in df.columns:
+                df[c] = np.nan
         print(df[cols])
     else:
         print("No successful evaluations.")

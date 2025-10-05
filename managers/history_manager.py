@@ -2,8 +2,9 @@
 # - Loads historical OHLCV
 # - Computes indicators (EMA, CMO, +DM, -DM) and candlestick patterns
 # - Builds a clean features DataFrame with a next-bar target (UP_DOWN)
+# - Adds forward-return targets: FWD_RET, FWD_RET_BPS
+# - Merges Fear & Greed and BTC on-chain features (defaults: enabled)
 # - Updates with the latest closed bar and exposes prediction features
-# - Merges Fear & Greed features and BTC on-chain smoothed features
 
 from typing import Tuple, Optional, Dict, Any, List
 
@@ -12,8 +13,6 @@ import pandas as pd
 import talib
 from binance.client import Client
 
-# --- add imports for your feature modules (adjust paths/names if needed) ---
-# If your files are named differently, just update these two lines.
 from features.fear_index import get_fng_features
 from features.on_chain_data import get_btc_onchain_smoothed
 
@@ -32,7 +31,7 @@ INTERVAL_TO_MS = {
     Client.KLINE_INTERVAL_1DAY: 24 * 60 * 60_000,
 }
 
-# Map Binance constants to the string codes expected by the two feature modules
+# Map Binance constants to the code strings expected by the feature modules
 _BINANCE_CONST_TO_CODE = {
     Client.KLINE_INTERVAL_1MINUTE: "1m",
     Client.KLINE_INTERVAL_3MINUTE: "3m",
@@ -50,10 +49,6 @@ _BINANCE_CONST_TO_CODE = {
 
 
 def _as_dataframe(klines: list) -> pd.DataFrame:
-    """
-    Convert raw binance klines to a pandas DataFrame.
-    Columns (subset): open_time, open, high, low, close, volume
-    """
     cols = [
         "open_time",
         "open",
@@ -69,7 +64,6 @@ def _as_dataframe(klines: list) -> pd.DataFrame:
         "ignore",
     ]
     df = pd.DataFrame(klines, columns=cols)
-    # keep numeric types
     for c in ["open_time", "close_time", "number_of_trades"]:
         df[c] = pd.to_numeric(df[c], downcast="integer", errors="coerce")
     for c in [
@@ -83,22 +77,16 @@ def _as_dataframe(klines: list) -> pd.DataFrame:
         "taker_buy_quote",
     ]:
         df[c] = pd.to_numeric(df[c], errors="coerce")
-    df = df[["open_time", "open", "high", "low", "close", "volume"]]
-    return df
+    return df[["open_time", "open", "high", "low", "close", "volume"]]
 
 
 def _bin_pattern_to_binary(arr: np.ndarray) -> np.ndarray:
-    """
-    TA-Lib candlestick functions return -100, 0, +100.
-    Map strictly positive to 1, else 0 (so -100 and 0 => 0).
-    """
     return (np.sign(arr) > 0).astype(np.int32)
 
 
 class HistoryManager:
     """
     Manages historical and latest market data, indicators, and features.
-    Now optionally merges Fear & Greed features and BTC on-chain smoothed features.
     """
 
     def __init__(
@@ -109,6 +97,7 @@ class HistoryManager:
         start_str: str,
         timelag: int = 20,
         *,
+        # external features (defaults ON as requested)
         include_fng: bool = True,
         fng_kwargs: Optional[Dict[str, Any]] = None,
         include_onchain: bool = True,
@@ -130,12 +119,11 @@ class HistoryManager:
         self.include_onchain = include_onchain
         self.onchain_kwargs = onchain_kwargs or {}
 
-        # core OHLCV data
+        # data holders
         self.df_ohlcv: pd.DataFrame = pd.DataFrame()
-        # full modeling table (features + label)
         self.df_features: pd.DataFrame = pd.DataFrame()
 
-        # List of predictor column names (fixed order; we may append new ones dynamically)
+        # base predictors (we auto-extend if external numeric columns are added)
         self.predictor_cols = [
             "EMA",
             "CMO",
@@ -171,9 +159,6 @@ class HistoryManager:
     # ---------- Data Fetch ----------
 
     def load_history(self) -> None:
-        """
-        Loads full history from start_str to now and builds features.
-        """
         klines = self.client.get_historical_klines(
             symbol=self.symbol,
             interval=self.interval,
@@ -182,14 +167,9 @@ class HistoryManager:
         self.df_ohlcv = _as_dataframe(klines)
         if self.df_ohlcv.empty:
             raise RuntimeError("No historical data returned.")
-
         self._recompute_features()
 
     def update_with_latest(self, limit: int = 2) -> None:
-        """
-        Pulls the most recent klines (default 2 for safety), appends any new CLOSED bars,
-        then recomputes indicators/features.
-        """
         recent = self.client.get_klines(
             symbol=self.symbol, interval=self.interval, limit=limit
         )
@@ -203,7 +183,6 @@ class HistoryManager:
             if not new_rows.empty:
                 self.df_ohlcv = pd.concat([self.df_ohlcv, new_rows], ignore_index=True)
 
-        # Rebuild features whenever we extend ohclv (simple & safe)
         self._recompute_features()
 
     # ---------- Features ----------
@@ -211,42 +190,36 @@ class HistoryManager:
     def _recompute_features(self) -> None:
         df = self.df_ohlcv.copy()
 
-        # --- basic series ---
         close = df["close"].to_numpy(dtype=float)
         high = df["high"].to_numpy(dtype=float)
         low = df["low"].to_numpy(dtype=float)
         openp = df["open"].to_numpy(dtype=float)
         vol = df["volume"].to_numpy(dtype=float)
 
-        # --- your existing indicators ---
         ema = talib.EMA(close, timeperiod=self.timelag)
         cmo = talib.CMO(close, timeperiod=self.timelag)
         minusdm = talib.MINUS_DM(high, low, timeperiod=self.timelag)
         plusdm = talib.PLUS_DM(high, low, timeperiod=self.timelag)
 
-        patt_3out_raw = talib.CDL3OUTSIDE(openp, high, low, close)
-        patt_cmb_raw = talib.CDLCLOSINGMARUBOZU(openp, high, low, close)
-        patt_3out = _bin_pattern_to_binary(patt_3out_raw)
-        patt_cmb = _bin_pattern_to_binary(patt_cmb_raw)
+        patt_3out = _bin_pattern_to_binary(talib.CDL3OUTSIDE(openp, high, low, close))
+        patt_cmb = _bin_pattern_to_binary(
+            talib.CDLCLOSINGMARUBOZU(openp, high, low, close)
+        )
 
-        # --- lags ---
         closel1 = df["close"].shift(1)
         closel2 = df["close"].shift(2)
         closel3 = df["close"].shift(3)
 
-        # --- TA-Lib indicators (periods mostly = timelag) ---
-        # Momentum
         rsi = talib.RSI(close, timeperiod=self.timelag)
         macd, macd_sig, macd_hist = talib.MACD(
             close, fastperiod=12, slowperiod=26, signalperiod=9
         )
         adx = talib.ADX(high, low, close, timeperiod=self.timelag)
-        trix = talib.TRIX(close, timeperiod=self.timelag)  # triple smoothed ROC
-        roc = talib.ROC(close, timeperiod=self.timelag)  # simple ROC
+        trix = talib.TRIX(close, timeperiod=self.timelag)
+        roc = talib.ROC(close, timeperiod=self.timelag)
 
-        # Volatility
         atr = talib.ATR(high, low, close, timeperiod=self.timelag)
-        natr = talib.NATR(high, low, close, timeperiod=self.timelag)  # normalized ATR (%)
+        natr = talib.NATR(high, low, close, timeperiod=self.timelag)
         bb_upper, bb_middle, bb_lower = talib.BBANDS(
             close, timeperiod=self.timelag, nbdevup=2, nbdevdn=2, matype=0
         )
@@ -257,13 +230,11 @@ class HistoryManager:
             where=(bb_middle != 0) & ~np.isnan(bb_middle),
         )
 
-        # Volume/flow
         obv = talib.OBV(close, vol)
         mfi = talib.MFI(high, low, close, vol, timeperiod=self.timelag)
-        ad = talib.AD(high, low, close, vol)  # Chaikin Acc/Dist line
+        ad = talib.AD(high, low, close, vol)
         adosc = talib.ADOSC(high, low, close, vol, fastperiod=3, slowperiod=10)
 
-        # Stochastics (defaults are classic 14,3,3; here tie to timelag)
         k_period = max(int(self.timelag), 5)
         d_period = 3
         stoch_k, stoch_d = talib.STOCH(
@@ -277,10 +248,8 @@ class HistoryManager:
             slowd_matype=0,
         )
 
-        # --- assemble base feature table (index preserved) ---
         feat = pd.DataFrame(
             {
-                # existing
                 "EMA": ema,
                 "CMO": cmo,
                 "MINUSDM": minusdm,
@@ -291,7 +260,6 @@ class HistoryManager:
                 "CLOSEL3": closel3,
                 "PATT_3OUT": patt_3out,
                 "PATT_CMB": patt_cmb,
-                # new
                 "RSI": rsi,
                 "MACD": macd,
                 "MACD_SIGNAL": macd_sig,
@@ -315,25 +283,28 @@ class HistoryManager:
             index=df.index,
         )
 
+        # (NEW) forward returns (direction + magnitude)
+        up_down = (df["close"].shift(-1) > df["close"]).astype("float64")
+        feat["UP_DOWN"] = up_down
+        feat["FWD_RET"] = (df["close"].shift(-1) / df["close"]) - 1.0
+        feat["FWD_RET_BPS"] = 1e4 * feat["FWD_RET"]
+
+        # (NEW) external features
         ts_utc = pd.to_datetime(df["open_time"], unit="ms", utc=True)
         start_iso = ts_utc.iloc[0].isoformat()
         end_iso = ts_utc.iloc[-1].isoformat()
         code_iv = _BINANCE_CONST_TO_CODE[self.interval]
 
-        base_cols: set = set(feat.columns)
+        base_cols = set(feat.columns)
         appended_cols: List[str] = []
 
-        # Fear & Greed
+        # Fear & Greed — keep numeric only (drop the string label)
         if self.include_fng:
             try:
                 fng_df = get_fng_features(
-                    start=start_iso,
-                    end=end_iso,
-                    interval=code_iv,
-                    **self.fng_kwargs,
+                    start=start_iso, end=end_iso, interval=code_iv, **self.fng_kwargs
                 )
                 if not fng_df.empty:
-                    # keep only numeric columns (drop the string label)
                     fng_num = fng_df.select_dtypes(include=[np.number])
                     if not fng_num.empty:
                         fng_aligned = fng_num.reindex(ts_utc, method="ffill")
@@ -343,8 +314,7 @@ class HistoryManager:
             except Exception:
                 pass
 
-
-        # On-chain (BTC)
+        # On-chain — numeric frame already
         if self.include_onchain:
             try:
                 oc_df = get_btc_onchain_smoothed(
@@ -354,65 +324,66 @@ class HistoryManager:
                     **self.onchain_kwargs,
                 )
                 if not oc_df.empty:
-                    oc_aligned = oc_df.reindex(ts_utc, method="ffill")
-                    oc_aligned.index = feat.index
-                    feat = feat.join(oc_aligned, how="left")
-                    appended_cols.extend([c for c in oc_aligned.columns])
+                    oc_num = oc_df.select_dtypes(include=[np.number])
+                    if not oc_num.empty:
+                        oc_aligned = oc_num.reindex(ts_utc, method="ffill")
+                        oc_aligned.index = feat.index
+                        feat = feat.join(oc_aligned, how="left")
+                        appended_cols.extend(list(oc_aligned.columns))
             except Exception:
-                # Fail safe: skip on-chain if anything goes wrong
                 pass
 
-        # --- target for next bar ---
-        up_down = (df["close"].shift(-1) > df["close"]).astype("float64")
-        feat["UP_DOWN"] = up_down
+        # numeric-only safety for models
+        non_numeric = feat.select_dtypes(exclude=[np.number]).columns.tolist()
+        if non_numeric:
+            feat = feat.drop(columns=non_numeric)
 
-        # --- clean up ---
+        # finalize target dtype
         feat = feat.replace([np.inf, -np.inf], np.nan).dropna()
         feat = feat.astype({"UP_DOWN": "int64"})
 
-        # Expand predictor list with any newly appended columns (keep original order first)
+        # extend predictor list with any newly joined numeric columns (keep order)
         if appended_cols:
-            new_cols = [c for c in feat.columns if c not in base_cols and c != "UP_DOWN"]
-            for c in new_cols:
-                if pd.api.types.is_numeric_dtype(feat[c]):
-                    if c not in self.predictor_cols:
+            for c in feat.columns:
+                if c not in base_cols and c not in (
+                    "UP_DOWN",
+                    "FWD_RET",
+                    "FWD_RET_BPS",
+                ):
+                    if c not in self.predictor_cols and pd.api.types.is_numeric_dtype(
+                        feat[c]
+                    ):
                         self.predictor_cols.append(c)
-
-        # belt & suspenders: drop any non-numeric columns that snuck in
-        _non_numeric = feat.select_dtypes(exclude=[np.number]).columns.tolist()
-        if _non_numeric:
-            feat = feat.drop(columns=_non_numeric)
 
         self.df_features = feat
 
     # ---------- Accessors ----------
 
     def last_closed_open_time_ms(self) -> int:
-        """
-        Returns the open_time ms of the last CLOSED bar in df_features.
-        (df_features has dropped the last unlabeled row, so last row is safely closed)
-        """
         last_idx = self.df_features.index[-1]
         return int(self.df_ohlcv.loc[last_idx, "open_time"])
 
     def next_bar_close_time_ms(self) -> int:
-        """
-        Compute the expected close time of the next bar after the last CLOSED bar in features.
-        """
-        last_open_ms = self.last_closed_open_time_ms()
-        return last_open_ms + self.interval_ms
+        return self.last_closed_open_time_ms() + self.interval_ms
 
-    def dataset(self) -> Tuple[pd.DataFrame, pd.Series]:
+    def dataset(self, target: str = "direction") -> Tuple[pd.DataFrame, pd.Series]:
         """
-        Returns (X, y) for model training.
+        target:
+          - 'direction'   -> UP_DOWN (int)
+          - 'return'      -> FWD_RET (float)
+          - 'return_bps'  -> FWD_RET_BPS (float)
         """
         X = self.df_features[self.predictor_cols].copy()
-        y = self.df_features["UP_DOWN"].copy()
-        return X, y
+        if target == "direction":
+            y = self.df_features["UP_DOWN"].copy()
+        elif target == "return":
+            y = self.df_features["FWD_RET"].copy()
+        elif target == "return_bps":
+            y = self.df_features["FWD_RET_BPS"].copy()
+        else:
+            raise ValueError("target must be 'direction'|'return'|'return_bps'")
+        m = y.notna()
+        return X.loc[m], y.loc[m]
 
     def latest_features_row(self) -> pd.DataFrame:
-        """
-        Returns the last available feature row (for predicting the next bar).
-        This is the final row of df_features.
-        """
         return self.df_features[self.predictor_cols].iloc[[-1]].copy()

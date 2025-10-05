@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-import test_model as tm
+import backtest as tm
 
 
 def test_parse_start_list_mixed():
@@ -101,6 +101,7 @@ def test_evaluate_combo_smoke(monkeypatch):
         ret_bps=0.0,
         client=FakeClient(),
         best_metric="sharpe_like",
+        task="regress",
     )
 
     # sanity checks

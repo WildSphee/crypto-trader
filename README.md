@@ -92,14 +92,15 @@ If your regression is unstable → fall back to **classification**.
 Run a **multi-interval, multi-model** grid backtest with full sweep:
 
 ```bash
-python test_model.py \
+python backtest.py \
   --symbol BTCUSDT \
-  --intervals "1h,4h,8h,1d" \
+  --intervals "4h,8h,1d" \
   --start-list "120d,365d,720d" \
   --models "logreg,sgdlog,rf,hgb,linsvc,bilstm,gru_lstm,hybrid_transformer,voting_soft,stacking,metalabel" \
   --best-metric total_net_return \
-  --fees-bps 10 --slippage-bps 5 \
-  --split-mode time --test-size 0.2
+  --fees-bps 10 --slippage-bps 3 \
+  --split-mode time --test-size 0.2 \
+  --task regress
 ```
 
 Results land in `backtest_output/metrics/`.
@@ -277,7 +278,7 @@ More tips:
 | `managers/model_manager.py` | Define model pipelines |
 | `managers/position_manager.py` | Position sizing and execution |
 | `evaluations/evaluator.py` | Threshold sweeps and performance metrics |
-| `test_model.py` | Backtest grid runner |
+| `backtest.py` | Backtest grid runner |
 | `bot.py` | Live trading loop |
 
 ---
@@ -293,7 +294,7 @@ For personal and research use only.
 
 ```bash
 # Run backtest
-python test_model.py --symbol BTCUSDT --intervals "1h,4h,8h,1d" --start-list "120d,365d,720d" --models "logreg,rf,hgb" --best-metric total_net_return
+python backtest.py --symbol BTCUSDT --intervals "1h,4h,8h,1d" --start-list "120d,365d,720d" --models "logreg,rf,hgb" --best-metric total_net_return
 
 # Run live bot (classification)
 python bot.py

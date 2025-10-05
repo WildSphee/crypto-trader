@@ -63,13 +63,15 @@ BTC_METRICS: Dict[str, str] = {
     "avg-block-size": "avg_block_size",
 }
 
+
 # --- helpers ---
 def _fetch_chart(slug: str, start_iso: str) -> Optional[dict]:
     try:
         r = requests.get(
             BC_BASE.format(slug=slug),
             params={"start": start_iso, "format": "json", "sampled": "false"},
-            headers=UA, timeout=30,
+            headers=UA,
+            timeout=30,
         )
         if r.status_code == 404:
             return None
@@ -77,6 +79,7 @@ def _fetch_chart(slug: str, start_iso: str) -> Optional[dict]:
         return r.json()
     except requests.RequestException:
         return None
+
 
 def _to_df(payload: dict, col: str) -> pd.DataFrame:
     vals = payload.get("values", [])
@@ -87,11 +90,15 @@ def _to_df(payload: dict, col: str) -> pd.DataFrame:
     df[col] = pd.to_numeric(df["y"], errors="coerce")
     return df[["ts", col]].dropna().sort_values("ts")
 
-def _clip(df: pd.DataFrame, start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> pd.DataFrame:
+
+def _clip(
+    df: pd.DataFrame, start_ts: pd.Timestamp, end_ts: pd.Timestamp
+) -> pd.DataFrame:
     if df.empty:
         return df
     m = (df["ts"] >= start_ts) & (df["ts"] <= end_ts)
     return df.loc[m]
+
 
 def _ensure_utc_index(df: pd.DataFrame) -> pd.DataFrame:
     """Ensure index is tz-aware UTC without raising on already-aware indexes."""
@@ -102,7 +109,10 @@ def _ensure_utc_index(df: pd.DataFrame) -> pd.DataFrame:
         df.index = idx.tz_convert("UTC")
     return df
 
-def _to_daily_groupby(df: pd.DataFrame, col: str, how: Literal["mean","last"]) -> pd.DataFrame:
+
+def _to_daily_groupby(
+    df: pd.DataFrame, col: str, how: Literal["mean", "last"]
+) -> pd.DataFrame:
     """Force daily by grouping on UTC date (no resample bin-edge quirks)."""
     if df.empty:
         return pd.DataFrame(columns=[col])
@@ -115,6 +125,7 @@ def _to_daily_groupby(df: pd.DataFrame, col: str, how: Literal["mean","last"]) -
     out = out.to_frame()
     return _ensure_utc_index(out)
 
+
 def _smooth_past_only(daily_df: pd.DataFrame, lookback_days: int) -> pd.DataFrame:
     """Per-column: shift(1).rolling(window).mean() -> leakage-safe."""
     out = pd.DataFrame(index=daily_df.index)
@@ -123,7 +134,10 @@ def _smooth_past_only(daily_df: pd.DataFrame, lookback_days: int) -> pd.DataFram
         out[c + "_smooth"] = s.shift(1).rolling(lookback_days, min_periods=1).mean()
     return out
 
-def _make_grid(start_ts: pd.Timestamp, end_ts: pd.Timestamp, interval: str) -> pd.DatetimeIndex:
+
+def _make_grid(
+    start_ts: pd.Timestamp, end_ts: pd.Timestamp, interval: str
+) -> pd.DatetimeIndex:
     if interval not in SUPPORTED_INTERVALS:
         raise ValueError("Unsupported interval")
     # Align start on the bin edge for the chosen frequency
@@ -134,17 +148,27 @@ def _make_grid(start_ts: pd.Timestamp, end_ts: pd.Timestamp, interval: str) -> p
         tz="UTC",
     )
 
+
 def _fetch_binance(
     symbol: str,
-    interval: Literal["1m","3m","5m","15m","30m","1h","2h","4h","6h","8h","12h","1d"],
+    interval: Literal[
+        "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d"
+    ],
     start_ms: int,
-    end_ms: int
+    end_ms: int,
 ) -> pd.DataFrame:
     """Use kline OPEN time so indices land exactly on the grid."""
     url = "https://api.binance.com/api/v3/klines"
-    params = {"symbol": symbol, "interval": interval, "startTime": start_ms, "endTime": end_ms, "limit": 1000}
+    params = {
+        "symbol": symbol,
+        "interval": interval,
+        "startTime": start_ms,
+        "endTime": end_ms,
+        "limit": 1000,
+    }
     try:
-        r = requests.get(url, params=params, headers=UA, timeout=30); r.raise_for_status()
+        r = requests.get(url, params=params, headers=UA, timeout=30)
+        r.raise_for_status()
         data = r.json()
     except requests.RequestException:
         return pd.DataFrame()
@@ -152,28 +176,45 @@ def _fetch_binance(
     if not isinstance(data, list) or not data:
         return pd.DataFrame()
 
-    cols = ["open_time","open","high","low","close","volume",
-            "close_time","qav","num_trades","taker_base","taker_quote","ignore"]
+    cols = [
+        "open_time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "close_time",
+        "qav",
+        "num_trades",
+        "taker_base",
+        "taker_quote",
+        "ignore",
+    ]
     df = pd.DataFrame(data, columns=cols)
     ts = pd.to_datetime(df["open_time"], unit="ms", utc=True)  # align on open
-    out = pd.DataFrame({
-        "ts_utc": ts,
-        "price_open":  pd.to_numeric(df["open"], errors="coerce"),
-        "price_high":  pd.to_numeric(df["high"], errors="coerce"),
-        "price_low":   pd.to_numeric(df["low"], errors="coerce"),
-        "price_close": pd.to_numeric(df["close"], errors="coerce"),
-        "price_volume":pd.to_numeric(df["volume"], errors="coerce"),
-    }).dropna(subset=["price_close"])
+    out = pd.DataFrame(
+        {
+            "ts_utc": ts,
+            "price_open": pd.to_numeric(df["open"], errors="coerce"),
+            "price_high": pd.to_numeric(df["high"], errors="coerce"),
+            "price_low": pd.to_numeric(df["low"], errors="coerce"),
+            "price_close": pd.to_numeric(df["close"], errors="coerce"),
+            "price_volume": pd.to_numeric(df["volume"], errors="coerce"),
+        }
+    ).dropna(subset=["price_close"])
     return out.set_index("ts_utc").sort_index()
+
 
 # --- public: minimal API ---
 def get_btc_onchain_smoothed(
     start: str,
     end: str,
-    interval: Literal["1m","3m","5m","15m","30m","1h","2h","4h","6h","8h","12h","1d"] = "1d",
+    interval: Literal[
+        "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d"
+    ] = "1d",
     metrics: Optional[List[str]] = None,
     lookback_days: int = 3,
-    agg_to_daily: Literal["mean","last"] = "mean",
+    agg_to_daily: Literal["mean", "last"] = "mean",
     include_price: bool = False,
     price_symbol: str = "BTCUSDT",
 ) -> pd.DataFrame:
@@ -190,11 +231,15 @@ def get_btc_onchain_smoothed(
         raise ValueError(f"interval must be one of {sorted(SUPPORTED_INTERVALS)}")
 
     start_ts = pd.to_datetime(start, utc=True)
-    end_ts   = pd.to_datetime(end,   utc=True)
+    end_ts = pd.to_datetime(end, utc=True)
     if end_ts < start_ts:
         raise ValueError("end must be >= start")
 
-    chosen = BTC_METRICS if metrics is None else {k: BTC_METRICS[k] for k in metrics if k in BTC_METRICS}
+    chosen = (
+        BTC_METRICS
+        if metrics is None
+        else {k: BTC_METRICS[k] for k in metrics if k in BTC_METRICS}
+    )
 
     # 1) pull & 2) daily-ize
     daily_frames = []
@@ -206,7 +251,9 @@ def get_btc_onchain_smoothed(
         df = _clip(df, start_ts, end_ts)
         if df.empty:
             continue
-        daily = _to_daily_groupby(df, col, agg_to_daily)  # clean daily index at 00:00 UTC
+        daily = _to_daily_groupby(
+            df, col, agg_to_daily
+        )  # clean daily index at 00:00 UTC
         daily_frames.append(daily)
 
     if not daily_frames:
@@ -231,7 +278,8 @@ def get_btc_onchain_smoothed(
     # 6) optional price merge (LEFT join to avoid extra timestamps)
     if include_price and not out.empty:
         price = _fetch_binance(
-            price_symbol, interval,
+            price_symbol,
+            interval,
             int(out.index[0].timestamp() * 1000),
             int(out.index[-1].timestamp() * 1000),
         )

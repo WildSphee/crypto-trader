@@ -51,10 +51,13 @@ _FNG_TO_ORD = {
     "Extreme Greed": 5,
 }
 
+
 def get_fng_features(
     start: str,
     end: str,
-    interval: Literal["1m","3m","5m","15m","30m","1h","2h","4h","6h","8h","12h","1d"] = "1d",
+    interval: Literal[
+        "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d"
+    ] = "1d",
     lookback_days: int = 3,
     past_only: bool = True,
     session: Optional[requests.Session] = None,
@@ -70,29 +73,48 @@ def get_fng_features(
 
     records = payload.get("data", [])
     if not records:
-        return pd.DataFrame(columns=[
-            "fng_score","fng_label","fng_ordinal",
-            "fng_ordinal_smooth","fng_ordinal_smooth_int"
-        ])
+        return pd.DataFrame(
+            columns=[
+                "fng_score",
+                "fng_label",
+                "fng_ordinal",
+                "fng_ordinal_smooth",
+                "fng_ordinal_smooth_int",
+            ]
+        )
 
     df = pd.DataFrame(records)
     ts = pd.to_datetime(df["timestamp"].astype(int), unit="s", utc=True)
     ts_norm = ts.dt.normalize()
 
-    df = pd.DataFrame({
-        "ts_utc": ts_norm,  # day-level alignment
-        "fng_score": pd.to_numeric(df["value"], errors="coerce"),
-        "fng_label": df["value_classification"].astype(str),
-    }).dropna(subset=["fng_score"]).sort_values("ts_utc").drop_duplicates("ts_utc")
+    df = (
+        pd.DataFrame(
+            {
+                "ts_utc": ts_norm,  # day-level alignment
+                "fng_score": pd.to_numeric(df["value"], errors="coerce"),
+                "fng_label": df["value_classification"].astype(str),
+            }
+        )
+        .dropna(subset=["fng_score"])
+        .sort_values("ts_utc")
+        .drop_duplicates("ts_utc")
+    )
 
     start_ts = pd.to_datetime(start, utc=True)
-    end_ts   = pd.to_datetime(end,   utc=True)
-    df = df[(df["ts_utc"] >= start_ts.normalize()) & (df["ts_utc"] <= end_ts.normalize())]
+    end_ts = pd.to_datetime(end, utc=True)
+    df = df[
+        (df["ts_utc"] >= start_ts.normalize()) & (df["ts_utc"] <= end_ts.normalize())
+    ]
     if df.empty:
-        return pd.DataFrame(columns=[
-            "fng_score","fng_label","fng_ordinal",
-            "fng_ordinal_smooth","fng_ordinal_smooth_int"
-        ])
+        return pd.DataFrame(
+            columns=[
+                "fng_score",
+                "fng_label",
+                "fng_ordinal",
+                "fng_ordinal_smooth",
+                "fng_ordinal_smooth_int",
+            ]
+        )
 
     df["fng_ordinal"] = df["fng_label"].map(_FNG_TO_ORD).fillna(3).astype(int)
 
@@ -116,5 +138,11 @@ def get_fng_features(
         out = base.reindex(target_index, method="ffill")
         out.index.name = "ts_utc"
 
-    cols = ["fng_score","fng_label","fng_ordinal","fng_ordinal_smooth","fng_ordinal_smooth_int"]
+    cols = [
+        "fng_score",
+        "fng_label",
+        "fng_ordinal",
+        "fng_ordinal_smooth",
+        "fng_ordinal_smooth_int",
+    ]
     return out[cols]

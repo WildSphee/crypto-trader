@@ -11,13 +11,15 @@ from sklearn.ensemble import (
     RandomForestClassifier,
     VotingClassifier,
     StackingClassifier,
+    RandomForestRegressor,
+    HistGradientBoostingRegressor,
 )
-from sklearn.linear_model import LogisticRegression, SGDClassifier
-from sklearn.metrics import accuracy_score
+from sklearn.linear_model import LogisticRegression, SGDClassifier, Ridge
+from sklearn.metrics import accuracy_score, r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.svm import LinearSVC
+from sklearn.svm import LinearSVC, SVR
 import tensorflow as tf
 
 try:
@@ -43,7 +45,8 @@ except Exception:  # pragma: no cover
     keras = None  # type: ignore
     layers = None  # type: ignore
 
-ModelName = Literal[
+# ---- model/type names (keep your existing classifier names) ----
+ClassifierName = Literal[
     "logreg",
     "sgdlog",
     "rf",
@@ -56,19 +59,31 @@ ModelName = Literal[
     "stacking",
     "metalabel",
 ]
+# Simple, practical regressors to start
+RegressorName = Literal["hgb_reg", "rf_reg", "linreg", "svr"]
+
+ModelName = Union[ClassifierName, RegressorName]
+Task = Literal["classify", "regress"]
+
 tf.get_logger().setLevel("ERROR")
 
 
-def _needs_scaling(model_name: ModelName) -> bool:
-    return model_name in {"logreg", "sgdlog", "linsvc", "voting_soft", "stacking"}
+def _needs_scaling(name: str) -> bool:
+    """Scale for linear / margin models; trees don't need it."""
+    return name in {
+        # classifiers
+        "logreg",
+        "sgdlog",
+        "linsvc",
+        "voting_soft",
+        "stacking",
+        # regressors
+        "linreg",
+        "svr",
+    }
 
 
 class GARCHVolatilityTransformer(TransformerMixin, BaseEstimator):
-    """
-    Appends a conditional volatility (GARCH(p,q)) feature from a returns column.
-    Produces a new numeric column `out_col` (default 'garch_vol').
-    """
-
     def __init__(
         self, returns_col: str, out_col: str = "garch_vol", p: int = 1, q: int = 1
     ):
@@ -78,7 +93,6 @@ class GARCHVolatilityTransformer(TransformerMixin, BaseEstimator):
         self.q = q
 
     def fit(self, X: pd.DataFrame, y=None):
-        # nothing to fit persistently
         return self
 
     def transform(self, X: pd.DataFrame):
@@ -99,18 +113,12 @@ class GARCHVolatilityTransformer(TransformerMixin, BaseEstimator):
         am = arch_model(keep.values, vol="GARCH", p=self.p, q=self.q, rescale=False)
         res = am.fit(disp="off")
         vol = pd.Series(res.conditional_volatility, index=keep.index)
-        # align back to original index
         aligned = vol.reindex(s.index).ffill().bfill()
         Xc[self.out_col] = aligned.values
         return Xc
 
 
 class SequenceMaker(TransformerMixin, BaseEstimator):
-    """
-    If X is already a 3D numpy array (n, t, d) it passes through.
-    Otherwise, calls user-provided function to create (n, t, d).
-    """
-
     def __init__(self, fn: Optional[Callable[[pd.DataFrame], np.ndarray]] = None):
         self.fn = fn
 
@@ -133,12 +141,6 @@ class SequenceMaker(TransformerMixin, BaseEstimator):
 
 
 class MetaLabelingClassifier(BaseEstimator, ClassifierMixin):
-    """
-    base: trains on all X,y and outputs p_base.
-    meta: trains only on cases base deems 'actionable' (p_base >= threshold).
-    final probability := p_base * p_meta (others get p_meta=0.5 by default).
-    """
-
     def __init__(
         self, base: BaseEstimator, meta: BaseEstimator, threshold: float = 0.5
     ):
@@ -150,7 +152,6 @@ class MetaLabelingClassifier(BaseEstimator, ClassifierMixin):
         self.base.fit(X, y)
         p = self.base.predict_proba(X)[:, 1]
         mask = p >= self.threshold
-        # support DataFrame or ndarray
         if isinstance(X, pd.DataFrame):
             X_mask = X.loc[mask]
         else:
@@ -158,9 +159,7 @@ class MetaLabelingClassifier(BaseEstimator, ClassifierMixin):
         y_mask = (
             y[mask] if isinstance(y, (pd.Series, np.ndarray)) else np.array(y)[mask]
         )
-
         if len(y_mask) == 0:
-            # fallback: train meta on all data
             self.meta.fit(X, y)
         else:
             self.meta.fit(X_mask, y_mask)
@@ -171,10 +170,7 @@ class MetaLabelingClassifier(BaseEstimator, ClassifierMixin):
         meta_p = np.full_like(pb, 0.5, dtype=float)
         mask = pb >= self.threshold
         if mask.any():
-            if isinstance(X, pd.DataFrame):
-                Xm = X.loc[mask]
-            else:
-                Xm = X[mask]
+            Xm = X.loc[mask] if isinstance(X, pd.DataFrame) else X[mask]
             meta_p[mask] = self.meta.predict_proba(Xm)[:, 1]
         final = pb * meta_p
         return np.vstack([1 - final, final]).T
@@ -184,11 +180,9 @@ class MetaLabelingClassifier(BaseEstimator, ClassifierMixin):
 
 
 def _ensure_keras():
-    """Keras builders for sequence models"""
     if KerasClassifier is None or keras is None or layers is None:
         raise ImportError(
-            "Sequence models require TensorFlow + SciKeras. Install:\n"
-            "  pip install tensorflow scikeras"
+            "Sequence models require TensorFlow + SciKeras. Install:\n  pip install tensorflow scikeras"
         )
 
 
@@ -223,7 +217,6 @@ def _hybrid_transformer_builder(meta):
     _ensure_keras()
     t, d = meta["X_shape_"][1], meta["X_shape_"][2]
     inp = keras.Input(shape=(t, d))
-    # Transformer-like encoder block
     x = layers.LayerNormalization()(inp)
     attn = layers.MultiHeadAttention(num_heads=4, key_dim=max(8, d // 2))(x, x)
     x = layers.Add()([x, attn])
@@ -242,7 +235,8 @@ def _hybrid_transformer_builder(meta):
 class ModelManager:
     """
     Flexible sklearn pipeline manager with multiple back-ends.
-    All models expose predict_proba via native method or calibration.
+    - task='classify' keeps your current behavior (probability of UP).
+    - task='regress' predicts next-bar return (e.g., in bps).
     """
 
     def __init__(
@@ -250,62 +244,61 @@ class ModelManager:
         predictor_cols: List[str],
         model_name: ModelName = "logreg",
         class_weight: Optional[str] = None,  # "balanced" or None
-        calibrate_svc: bool = True,  # for LinearSVC
+        calibrate_svc: bool = True,
         random_state: int = 1,
-        # NEW: sequence / deep-learning knobs
         input_kind: Literal["tabular", "sequence"] = "tabular",
         sequence_maker: Optional[Callable[[pd.DataFrame], np.ndarray]] = None,
         nn_epochs: int = 20,
         nn_batch_size: int = 32,
-        metalabel_base: ModelName = "hgb",
-        metalabel_meta: ModelName = "logreg",
+        metalabel_base: ClassifierName = "hgb",
+        metalabel_meta: ClassifierName = "logreg",
         metalabel_threshold: float = 0.5,
         garch_returns_col: Optional[str] = None,
         garch_out_col: str = "garch_vol",
         garch_pq: Tuple[int, int] = (1, 1),
-        voting_members: Optional[List[ModelName]] = None,
-        stacking_members: Optional[List[ModelName]] = None,
+        voting_members: Optional[List[ClassifierName]] = None,
+        stacking_members: Optional[List[ClassifierName]] = None,
+        # NEW
+        task: Task = "classify",
     ) -> None:
         self.predictor_cols = predictor_cols
         self.numeric_cols = predictor_cols[:-2]  # original convention
         self.pattern_cols = predictor_cols[-2:]  # PATT_3OUT, PATT_CMB
-        self.model_name = model_name
+        self.model_name: str = model_name  # accept both classifier & regressor names
         self.class_weight = class_weight
         self.calibrate_svc = calibrate_svc
         self.random_state = random_state
 
-        # sequence
         self.input_kind = input_kind
         self.sequence_maker = sequence_maker
         self.nn_epochs = nn_epochs
         self.nn_batch_size = nn_batch_size
 
-        # meta-labeling
         self.metalabel_base = metalabel_base
         self.metalabel_meta = metalabel_meta
         self.metalabel_threshold = metalabel_threshold
 
-        # garch
         self.garch_returns_col = garch_returns_col
         self.garch_out_col = garch_out_col
         self.garch_pq = garch_pq
 
-        # ensembles
         self.voting_members = voting_members or ["logreg", "rf", "hgb"]
         self.stacking_members = stacking_members or ["logreg", "rf", "hgb"]
 
+        self.task: Task = task
         self.pipeline: Optional[Pipeline] = None
-        self.last_test_accuracy: Optional[float] = None
+        self.last_test_accuracy: Optional[float] = None  # accuracy (clf) or R^2 (reg)
 
-    # -------------------- builders --------------------
-    def _simple_estimator(self, name: ModelName):
+    # -------------------- classifier builders --------------------
+    def _simple_estimator(self, name: ClassifierName):
         if name == "logreg":
             return LogisticRegression(
-                max_iter=5000,
+                max_iter=10000,
                 solver="saga",
-                C=0.5,
+                C=0.25,
                 class_weight=self.class_weight,
                 random_state=self.random_state,
+                tol=1e-3,
             )
         if name == "sgdlog":
             base = SGDClassifier(
@@ -332,12 +325,9 @@ class ModelManager:
             )
         if name == "linsvc":
             svc = LinearSVC(
-                class_weight=self.class_weight,
-                random_state=self.random_state,
+                class_weight=self.class_weight, random_state=self.random_state
             )
-            # Calibrate to get predict_proba
             return CalibratedClassifierCV(svc, cv=3)
-
         if name == "bilstm":
             _ensure_keras()
             return KerasClassifier(
@@ -362,16 +352,10 @@ class ModelManager:
                 batch_size=self.nn_batch_size,
                 verbose=0,
             )
-
-        raise ValueError(f"Unknown estimator name: {name}")
-
-    def _build_estimator(self):
-        # ensembles & meta-labeling are composed here
-        if self.model_name == "voting_soft":
+        if name == "voting_soft":
             members = [(m, self._simple_estimator(m)) for m in self.voting_members]
             return VotingClassifier(estimators=members, voting="soft")
-
-        if self.model_name == "stacking":
+        if name == "stacking":
             members = [(m, self._simple_estimator(m)) for m in self.stacking_members]
             final = LogisticRegression(
                 max_iter=2000,
@@ -382,21 +366,17 @@ class ModelManager:
             return StackingClassifier(
                 estimators=members, final_estimator=final, passthrough=False
             )
-
-        if self.model_name == "metalabel":
+        if name == "metalabel":
             base = self._simple_estimator(self.metalabel_base)
             meta = self._simple_estimator(self.metalabel_meta)
             return MetaLabelingClassifier(
                 base=base, meta=meta, threshold=self.metalabel_threshold
             )
+        raise ValueError(f"Unknown estimator name: {name}")
 
-        # regular single estimators, including deep ones
-        return self._simple_estimator(self.model_name)
-
-    def _build_pipeline(self) -> Pipeline:
+    def _build_pipeline_clf(self) -> Pipeline:
         steps: List[Tuple[str, object]] = []
 
-        # Optional GARCH feature for tabular pipelines
         if self.input_kind == "tabular" and self.garch_returns_col is not None:
             steps.append(
                 (
@@ -409,33 +389,89 @@ class ModelManager:
                     ),
                 )
             )
-            # treat the new column as numeric for scaling if we scale
             if self.garch_out_col not in self.numeric_cols:
                 self.numeric_cols = list(self.numeric_cols) + [self.garch_out_col]
 
-        # Preprocessing
         if self.input_kind == "sequence":
-            # sequences are handled by the deep models themselves; just ensure shape is (n,t,d)
             steps.append(("to_seq", SequenceMaker(self.sequence_maker)))
-            prep = "passthrough"
-        else:
-            if _needs_scaling(self.model_name):
-                prep = ColumnTransformer(
-                    transformers=[("scale", StandardScaler(), self.numeric_cols)],
-                    remainder="passthrough",
-                )
-            else:
-                prep = "passthrough"
-            steps.append(("prep", prep))
+            steps.append(("clf", self._simple_estimator(self.model_name)))  # type: ignore[arg-type]
+            return Pipeline(steps)
 
-        # Estimator
-        steps.append(("clf", self._build_estimator()))
+        prep = (
+            ColumnTransformer(
+                transformers=[("scale", StandardScaler(), self.numeric_cols)],
+                remainder="passthrough",
+            )
+            if _needs_scaling(self.model_name)
+            else "passthrough"
+        )
+
+        steps.append(("prep", prep))
+        steps.append(("clf", self._simple_estimator(self.model_name)))  # type: ignore[arg-type]
         return Pipeline(steps)
 
+    # -------------------- regressor builders --------------------
+    def _simple_estimator_reg(self, name: RegressorName):
+        if name == "hgb_reg":
+            return HistGradientBoostingRegressor(random_state=self.random_state)
+        if name == "rf_reg":
+            return RandomForestRegressor(
+                n_estimators=400, n_jobs=-1, random_state=self.random_state
+            )
+        if name == "linreg":
+            return Ridge(alpha=1.0, random_state=self.random_state)
+        if name == "svr":
+            return SVR(kernel="rbf")  # scaled upstream
+        raise ValueError(f"Unknown regressor name: {name}")
+
+    def _build_pipeline_reg(self) -> Pipeline:
+        steps: List[Tuple[str, object]] = []
+
+        if self.input_kind == "tabular" and self.garch_returns_col is not None:
+            steps.append(
+                (
+                    "garch",
+                    GARCHVolatilityTransformer(
+                        returns_col=self.garch_returns_col,
+                        out_col=self.garch_out_col,
+                        p=self.garch_pq[0],
+                        q=self.garch_pq[1],
+                    ),
+                )
+            )
+            if self.garch_out_col not in self.numeric_cols:
+                self.numeric_cols = list(self.numeric_cols) + [self.garch_out_col]
+
+        if self.input_kind == "sequence":
+            # (Optional future: sequence regressors)
+            raise NotImplementedError(
+                "Sequence regression not implemented. Use tabular regressors."
+            )
+
+        prep = (
+            ColumnTransformer(
+                transformers=[("scale", StandardScaler(), self.numeric_cols)],
+                remainder="passthrough",
+            )
+            if _needs_scaling(self.model_name)
+            else "passthrough"
+        )
+
+        steps.append(("prep", prep))
+        steps.append(("reg", self._simple_estimator_reg(self.model_name)))  # type: ignore[arg-type]
+        return Pipeline(steps)
+
+    # -------------------- training / inference --------------------
     def train(
         self, X: Union[pd.DataFrame, np.ndarray], y: Union[pd.Series, np.ndarray]
     ) -> float:
-        # classification sanity
+        """
+        Classification training (backward compatible).
+        Returns test accuracy.
+        """
+        if self.task != "classify":
+            raise RuntimeError("Use train_regression() when task='regress'.")
+
         if pd.Series(y).nunique() < 2:
             raise RuntimeError("Target has fewer than 2 classes; wait for more data.")
 
@@ -443,7 +479,7 @@ class ModelManager:
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=0.2, random_state=self.random_state, stratify=stratify
         )
-        self.pipeline = self._build_pipeline()
+        self.pipeline = self._build_pipeline_clf()
         self.pipeline.fit(X_train, y_train)
         y_pred = self.pipeline.predict(X_test)
         acc = accuracy_score(y_test, y_pred)
@@ -455,3 +491,32 @@ class ModelManager:
             raise RuntimeError("Model is not trained.")
         proba = self.pipeline.predict_proba(X_one)[0][1]
         return float(proba)
+
+    # --- regression ---
+    def train_regression(
+        self, X: Union[pd.DataFrame, np.ndarray], y: Union[pd.Series, np.ndarray]
+    ) -> float:
+        """
+        Regression training for next-bar return (e.g., bps).
+        Returns R^2 on a held-out split (and stores it in last_test_accuracy).
+        """
+        if self.task != "regress":
+            raise RuntimeError("Use train() when task='classify'.")
+
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=self.random_state
+        )
+        self.pipeline = self._build_pipeline_reg()
+        self.pipeline.fit(X_train, y_train)
+        y_hat = self.pipeline.predict(X_test)
+        r2 = r2_score(y_test, y_hat)
+        self.last_test_accuracy = float(r2)
+        return self.last_test_accuracy
+
+    def predict_return(self, X_one: Union[pd.DataFrame, np.ndarray]) -> float:
+        """
+        Predict next-bar return (same unit you trained on; recommended: bps).
+        """
+        if self.pipeline is None:
+            raise RuntimeError("Model is not trained.")
+        return float(self.pipeline.predict(X_one)[0])
