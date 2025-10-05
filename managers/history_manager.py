@@ -3,8 +3,6 @@
 # - Computes indicators (EMA, CMO, +DM, -DM) and candlestick patterns
 # - Builds a clean features DataFrame with a next-bar target (UP_DOWN)
 # - Updates with the latest closed bar and exposes prediction features
-#
-# Dependencies: numpy, pandas, talib, python-binance, config.py
 
 from typing import Tuple
 
