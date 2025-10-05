@@ -1,5 +1,6 @@
 #!/bin/sh
 
+
 check=false
 
 if [ -z "$1" ] || [ "$1" = "--check" ] ; then

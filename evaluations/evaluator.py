@@ -1,7 +1,3 @@
-"""
-Minimal evaluator you can import in test_model.py and bot.py to avoid duplication.
-"""
-
 from typing import Dict
 import numpy as np
 

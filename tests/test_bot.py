@@ -99,7 +99,6 @@ def patched_bot(monkeypatch):
     monkeypatch.setattr(bot_mod, "PositionManager", lambda **kw: fake_position)
     monkeypatch.setattr(bot_mod, "Client", lambda *a, **kw: fake_client)
 
-    # speed up loop: make interval_ms small and prevent sleep
     bot = bot_mod.TradeBot(
         symbol="BTCUSDT",
         trade_interval_code="1h",

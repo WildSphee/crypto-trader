@@ -1,6 +1,5 @@
 #!/bin/bash
 
-# Function to set the environment variable based on the presence of the --test flag
 set_environment() {
     if [[ "$1" == "--test" ]]; then
         export ENVIRONMENT="TEST"

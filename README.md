@@ -18,28 +18,6 @@ source venv/bin/activate
 pip install poetry
 poetry install --no-root
 ```
-<!-- 
-### Configure (`config.py`)
-
-Minimum fields you’ll likely use:
-
-```python
-api_key = ""
-api_secret = ""
-
-# Execution / data
-is_test_net = True
-trade_interval = "30m"   # e.g. 1m, 5m, 15m, 30m, 1h, 4h, 1d
-start_str = "120 days ago UTC"
-symbol = "BTCUSDT"
-timelag = 20
-retrain_every = 50 # bars between retrains
-threshold_sweep = "0.50:0.90:0.005"
-best_metric = "sharpe_like"  # or total_net_return / avg_net_ret_per_bar
-fees_bps = 10.0               # 10 bps
-slippage_bps = 5.0            # 5 bps
-calib_window_bars = 2000
-``` -->
 
 `.env`
 ```
@@ -50,6 +28,11 @@ BINANCE_API_INTERVAL=1h
 TESTNET=False
 ```
 
+before u start running anything, make sure the system is up to date
+```
+pytest .
+```
+you should see all test passed! Do not start trading without all the test showing pass!
 
 ### Run the backtest grid
 

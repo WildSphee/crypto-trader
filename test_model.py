@@ -1,11 +1,3 @@
-# test_model.py
-# ------------------------------------------------------------
-# Grid validator across intervals × start_strs × models.
-# - time-based or random split
-# - optional label mode: 'direction' or 'ret_gt_bps'
-# - threshold sweep (fees/slippage-aware) with shared metrics code
-# - CSV exports for datasets, predictions, and summary
-# ------------------------------------------------------------
 import argparse
 import os
 import time
@@ -69,7 +61,7 @@ def make_windows_from_df(
 
 def ensure_dirs(path: str) -> None:
     os.makedirs(path, exist_ok=True)
-    for sub in ["datasets", "metrics", "predictions"]:
+    for sub in ["metrics"]: 
         os.makedirs(os.path.join(path, sub), exist_ok=True)
 
 
