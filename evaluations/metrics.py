@@ -104,3 +104,16 @@ def sweep_thresholds(
         return -np.inf if (val is None or np.isnan(val)) else val
 
     return max(candidates, key=keyfun)
+
+
+def safe_mape_pct(y_true: np.ndarray, y_pred: np.ndarray, eps: float = 1e-8) -> float:
+    """
+    Mean Absolute Percentage Error (in %), ignoring targets whose absolute value <= eps.
+    Returns NaN if no valid targets remain after masking.
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    mask = np.abs(y_true) > eps
+    if not np.any(mask):
+        return float("nan")
+    return float(np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100.0)

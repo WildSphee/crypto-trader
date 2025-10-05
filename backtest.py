@@ -21,7 +21,7 @@ import config
 from managers.history_manager import HistoryManager
 from managers.model_manager import ModelManager
 
-from evaluations.metrics import SweepConfig
+from evaluations.metrics import SweepConfig, safe_mape_pct
 from evaluations.evaluator import choose_best_threshold_for_window
 
 import warnings
@@ -232,6 +232,7 @@ def evaluate_combo(
             cost_bps=cost_bps,
             best_metric=best_metric,
         )
+        mape_pct = safe_mape_pct(y_test, yhat_test)
 
         # artifacts
         ts_tag = time.strftime("%Y%m%d_%H%M%S")
@@ -300,6 +301,7 @@ def evaluate_combo(
             "cost_roundtrip": float(2.0 * ((fees_bps + slippage_bps) / 10_000.0)),
             "r2": float(r2),
             "mae_bps": float(mean_absolute_error(y_test, yhat_test)),
+            "mape_pct": float(mape_pct),
         }
 
     # ================= CLASSIFICATION PATH (original) =================
@@ -493,6 +495,7 @@ def evaluate_combo(
         "cost_roundtrip": float(2.0 * ((fees_bps + slippage_bps) / 10_000.0)),
         "r2": float("nan"),
         "mae_bps": float("nan"),
+        "mape_pct": float("nan"),
     }
 
 
@@ -611,6 +614,7 @@ def main():
             "rows",
             "accuracy",
             "r2",
+            "mape_pct",
             "avg_net_ret_per_bar",
             "total_net_return",
             "sharpe_like",
