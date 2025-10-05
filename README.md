@@ -16,9 +16,9 @@ End-to-end crypto strategy playground:
 python3 -m venv venv
 source venv/bin/activate
 pip install poetry
-poetry install
+poetry install --no-root
 ```
-
+<!-- 
 ### Configure (`config.py`)
 
 Minimum fields you’ll likely use:
@@ -39,7 +39,17 @@ best_metric = "sharpe_like"  # or total_net_return / avg_net_ret_per_bar
 fees_bps = 10.0               # 10 bps
 slippage_bps = 5.0            # 5 bps
 calib_window_bars = 2000
+``` -->
+
+`.env`
 ```
+# binance creds
+BINANCE_API_KEY=
+BINANCE_API_SECRET=
+BINANCE_API_INTERVAL=1h
+TESTNET=False
+```
+
 
 ### Run the backtest grid
 
