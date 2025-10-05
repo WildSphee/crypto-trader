@@ -12,7 +12,7 @@ fng_ordinal_smooth_int — fng_ordinal_smooth rounded to the nearest integer 1-5
 
 
 fng_score	fng_label	fng_ordinal	fng_ordinal_smooth	fng_ordinal_smooth_int
-ts_utc					
+ts_utc
 2025-06-30 00:00:00+00:00	66	Greed	4	NaN	<NA>
 2025-06-30 04:00:00+00:00	66	Greed	4	NaN	<NA>
 2025-06-30 08:00:00+00:00	66	Greed	4	NaN	<NA>
@@ -24,11 +24,24 @@ ts_utc
 2025-09-27 16:00:00+00:00	33	Fear	2	2.0	2
 2025-09-27 20:00:00+00:00	33	Fear	2	2.0	2
 2025-09-28 00:00:00+00:00	37	Fear	2	2.0	2
-
 """
 
-
-SUPPORTED_INTERVALS = {"15min", "1h", "2h", "4h", "6h", "1d"}
+# Support all intervals used by your map_interval()
+_CODE_TO_PANDAS_FREQ = {
+    "1m": "1min",
+    "3m": "3min",
+    "5m": "5min",
+    "15m": "15min",
+    "30m": "30min",
+    "1h": "1H",
+    "2h": "2H",
+    "4h": "4H",
+    "6h": "6H",
+    "8h": "8H",
+    "12h": "12H",
+    "1d": "1D",
+}
+SUPPORTED_INTERVALS = set(_CODE_TO_PANDAS_FREQ.keys())
 
 _FNG_TO_ORD = {
     "Extreme Fear": 1,
@@ -41,7 +54,7 @@ _FNG_TO_ORD = {
 def get_fng_features(
     start: str,
     end: str,
-    interval: Literal["15min","1h","2h","4h","6h","1d"] = "1d",
+    interval: Literal["1m","3m","5m","15m","30m","1h","2h","4h","6h","8h","12h","1d"] = "1d",
     lookback_days: int = 3,
     past_only: bool = True,
     session: Optional[requests.Session] = None,
@@ -95,9 +108,11 @@ def get_fng_features(
 
     if interval == "1d":
         out = base.copy()
-        out.index.name = "ts_utc"  # keep consistent with sub-daily case
+        out.index.name = "ts_utc"
     else:
-        target_index = pd.date_range(start=start_ts, end=end_ts, freq=interval, tz="UTC")
+        target_index = pd.date_range(
+            start=start_ts, end=end_ts, freq=_CODE_TO_PANDAS_FREQ[interval], tz="UTC"
+        )
         out = base.reindex(target_index, method="ffill")
         out.index.name = "ts_utc"
 

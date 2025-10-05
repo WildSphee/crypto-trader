@@ -20,7 +20,7 @@ total_tx_fees_btc_smooth - smoothed total fees paid by users (in BTC) per day
 blockchain_size_smooth - smoothed cumulative blockchain data size (GB)Monotonic ↑ by design
 
 unique_addresses_used_smooth	confirmed_tx_per_day_smooth	output_value_per_day_btc_smooth	avg_tx_per_block_smooth	median_confirmation_time_min_smooth	avg_confirmation_time_min_smooth	total_hash_rate_ths_smooth	network_difficulty_smooth	miners_revenue_usd_smooth	total_tx_fees_btc_smooth	blockchain_size_smooth	avg_block_size_smooth
-ts_utc												
+ts_utc
 2025-07-01 00:00:00+00:00	521131.0	339268.0	629712.813392	2339.77931	6.85	16.949163	8.430357e+08	1.169585e+14	4.933359e+07	4.228973	668824.13727	1.377226
 2025-07-01 04:00:00+00:00	521131.0	339268.0	629712.813392	2339.77931	6.85	16.949163	8.430357e+08	1.169585e+14	4.933359e+07	4.228973	668824.13727	1.377226
 2025-07-01 08:00:00+00:00	521131.0	339268.0	629712.813392	2339.77931	6.85	16.949163	8.430357e+08	1.169585e+14	4.933359e+07	4.228973	668824.13727	1.377226
@@ -28,13 +28,25 @@ ts_utc
 
 """
 
-
-
-
 BC_BASE = "https://api.blockchain.info/charts/{slug}"
 UA = {"User-Agent": "onchain-mini/1.0"}
 
-SUPPORTED_INTERVALS = {"1h", "4h", "1d"}
+# --- Interval support aligned with your map_interval default scaler ---
+_CODE_TO_PANDAS_FREQ = {
+    "1m": "1min",
+    "3m": "3min",
+    "5m": "5min",
+    "15m": "15min",
+    "30m": "30min",
+    "1h": "1H",
+    "2h": "2H",
+    "4h": "4H",
+    "6h": "6H",
+    "8h": "8H",
+    "12h": "12H",
+    "1d": "1D",
+}
+SUPPORTED_INTERVALS = set(_CODE_TO_PANDAS_FREQ.keys())
 
 BTC_METRICS: Dict[str, str] = {
     "n-unique-addresses": "unique_addresses_used",
@@ -112,20 +124,25 @@ def _smooth_past_only(daily_df: pd.DataFrame, lookback_days: int) -> pd.DataFram
     return out
 
 def _make_grid(start_ts: pd.Timestamp, end_ts: pd.Timestamp, interval: str) -> pd.DatetimeIndex:
-    if interval == "1d":
-        return pd.date_range(start=start_ts.floor("D"), end=end_ts.floor("D"), freq="1d", tz="UTC")
-    if interval == "4h":
-        return pd.date_range(start=start_ts.floor("4h"), end=end_ts, freq="4h", tz="UTC")
-    if interval == "1h":
-        return pd.date_range(start=start_ts.floor("1h"), end=end_ts, freq="1h", tz="UTC")
-    raise ValueError("Unsupported interval")
+    if interval not in SUPPORTED_INTERVALS:
+        raise ValueError("Unsupported interval")
+    # Align start on the bin edge for the chosen frequency
+    return pd.date_range(
+        start=start_ts.floor(_CODE_TO_PANDAS_FREQ[interval]),
+        end=end_ts,
+        freq=_CODE_TO_PANDAS_FREQ[interval],
+        tz="UTC",
+    )
 
-def _fetch_binance(symbol: str, interval: Literal["1h","4h","1d"],
-                   start_ms: int, end_ms: int) -> pd.DataFrame:
+def _fetch_binance(
+    symbol: str,
+    interval: Literal["1m","3m","5m","15m","30m","1h","2h","4h","6h","8h","12h","1d"],
+    start_ms: int,
+    end_ms: int
+) -> pd.DataFrame:
     """Use kline OPEN time so indices land exactly on the grid."""
-    iv = {"1h":"1h","4h":"4h","1d":"1d"}[interval]
     url = "https://api.binance.com/api/v3/klines"
-    params = {"symbol": symbol, "interval": iv, "startTime": start_ms, "endTime": end_ms, "limit": 1000}
+    params = {"symbol": symbol, "interval": interval, "startTime": start_ms, "endTime": end_ms, "limit": 1000}
     try:
         r = requests.get(url, params=params, headers=UA, timeout=30); r.raise_for_status()
         data = r.json()
@@ -153,7 +170,7 @@ def _fetch_binance(symbol: str, interval: Literal["1h","4h","1d"],
 def get_btc_onchain_smoothed(
     start: str,
     end: str,
-    interval: Literal["1h","4h","1d"] = "1d",
+    interval: Literal["1m","3m","5m","15m","30m","1h","2h","4h","6h","8h","12h","1d"] = "1d",
     metrics: Optional[List[str]] = None,
     lookback_days: int = 3,
     agg_to_daily: Literal["mean","last"] = "mean",
@@ -166,7 +183,7 @@ def get_btc_onchain_smoothed(
       2) force to DAILY via groupby(day)
       3) build full daily grid and forward-fill past values
       4) leakage-safe smoothing: shift(1).rolling(lookback_days).mean()
-      5) expand to 1h/4h/1d via forward-fill
+      5) expand to sub-daily intervals via forward-fill (supports 1m..12h + 1d)
       6) (optional) join Binance BTCUSDT on the same grid (aligned by kline OPEN)
     """
     if interval not in SUPPORTED_INTERVALS:
@@ -198,7 +215,7 @@ def get_btc_onchain_smoothed(
     # 3) full daily grid + ffill (uses only past values)
     daily = pd.concat(daily_frames, axis=1, join="outer").sort_index()
     full_idx = _make_grid(start_ts, end_ts, "1d")
-    daily = daily.reindex(full_idx).ffill()  # propagate prior values
+    daily = daily.reindex(full_idx).ffill()
     daily.index.name = "ts_utc"
 
     # 4) leakage-safe smoothing (per column)
@@ -212,7 +229,7 @@ def get_btc_onchain_smoothed(
         out = daily_smooth.reindex(grid, method="ffill")
 
     # 6) optional price merge (LEFT join to avoid extra timestamps)
-    if include_price:
+    if include_price and not out.empty:
         price = _fetch_binance(
             price_symbol, interval,
             int(out.index[0].timestamp() * 1000),

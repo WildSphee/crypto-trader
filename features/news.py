@@ -1,4 +1,6 @@
-#!/usr/bin/env python3
+
+# NOTE, NOT USED YET, AS DONT HAVE A NEWS DATASET
+
 """
 news_to_features.py
 -------------------
