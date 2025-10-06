@@ -20,13 +20,11 @@ dependencies = [
     "xgboost (>=3.0.4,<4.0.0)",
     "lightgbm (>=4.6.0,<5.0.0)",
     "catboost (>=1.2.8,<2.0.0)",
-    "tensorflow (>=2.20.0,<3.0.0)",
     "scikeras (>=0.13.0,<0.14.0)",
     "beautifulsoup4 (>=4.14.2,<5.0.0)",
     "python-dateutil (>=2.9.0.post0,<3.0.0)",
     "tldextract (>=5.3.0,<6.0.0)",
     "tenacity (>=9.1.2,<10.0.0)",
-    "transformers (>=4.57.0,<5.0.0)"
 ]
 
 
