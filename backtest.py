@@ -207,11 +207,11 @@ def evaluate_combo(
             "voting_soft": "hgb_reg",
             "stacking": "hgb_reg",
             "metalabel": "hgb_reg",
-            # allow native reg names, too
             "hgb_reg": "hgb_reg",
             "rf_reg": "rf_reg",
             "linreg": "linreg",
             "svr": "svr",
+            "arima": "arima",
         }
         reg_model_name = reg_name_map.get(model_name, "hgb_reg")
 
