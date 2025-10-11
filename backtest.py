@@ -15,6 +15,8 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
     mean_absolute_error,
+    log_loss,
+    mean_squared_error,
 )
 
 import config
@@ -119,11 +121,19 @@ def sweep_on_predicted_return(
         avg = float(np.nanmean(net))
         std = float(np.nanstd(net))
         sharpe_like = float(avg / (std + 1e-9))
+
+        # Sortino-like: mean / downside std (only negative net bars)
+        downside = net[net < 0.0]
+        downside_std = float(np.nanstd(downside)) if downside.size > 0 else np.nan
+        sortino_like = float(avg / (downside_std + 1e-9)) if not np.isnan(downside_std) else float("nan")
+
         metric = {
             "total_net_return": total,
             "avg_net_ret_per_bar": avg,
             "sharpe_like": sharpe_like,
-        }[best_metric]
+            "sortino_like": sortino_like,
+        }.get(best_metric, sharpe_like)
+
         if metric > best.get(best_metric, float("-inf")):
             best = {
                 "threshold": float(thr),
@@ -131,6 +141,7 @@ def sweep_on_predicted_return(
                 "total_net_return": total,
                 "avg_net_ret_per_bar": avg,
                 "sharpe_like": sharpe_like,
+                "sortino_like": sortino_like,
             }
     if best["total_net_return"] == float("-inf"):
         best.update(
@@ -140,10 +151,10 @@ def sweep_on_predicted_return(
                 "total_net_return": 0.0,
                 "avg_net_ret_per_bar": float("nan"),
                 "sharpe_like": float("nan"),
+                "sortino_like": float("nan"),
             }
         )
     return best
-
 
 def evaluate_combo(
     symbol: str,
@@ -225,6 +236,8 @@ def evaluate_combo(
 
         r2 = float(r2_score(y_test, yhat_test))
 
+        rmse_bps = float(np.sqrt(mean_squared_error(y_test, yhat_test)))
+
         cost_bps = 2.0 * (fees_bps + slippage_bps)
         best = sweep_on_predicted_return(
             yhat_bps=np.asarray(yhat_test, dtype=float),
@@ -298,9 +311,11 @@ def evaluate_combo(
             "avg_net_ret_per_trade": float("nan"),
             "total_net_return": float(best.get("total_net_return", 0.0)),
             "sharpe_like": float(best.get("sharpe_like", float("nan"))),
+            "sortino_like": float(best.get("sortino_like", float("nan"))),
             "cost_roundtrip": float(2.0 * ((fees_bps + slippage_bps) / 10_000.0)),
             "r2": float(r2),
             "mae_bps": float(mean_absolute_error(y_test, yhat_test)),
+            "rmse_bps": float(rmse_bps),
             "mape_pct": float(mape_pct),
         }
 
@@ -420,6 +435,32 @@ def evaluate_combo(
         best_metric=best_metric,
     )
 
+    # log loss (guarded)
+    try:
+        # p_up_test and y_test are already defined in both split modes
+        logloss = float(log_loss(y_test, p_up_test, labels=[0, 1]))
+    except Exception:
+        logloss = float("nan")
+
+    # sortino-like: rebuild per-trade net series at chosen threshold
+    try:
+        thr = float(best.get("threshold", 0.50))
+        take = p_up_test >= thr
+        trades = int(np.sum(take))
+        if trades > 0:
+            # fwd_test is fraction return; convert to bps, then subtract round-trip costs
+            cost_bps = 2.0 * (fees_bps + slippage_bps)
+            net_bps = (fwd_test[take] * 10_000.0) - cost_bps
+            avg_net = float(np.nanmean(net_bps))
+            downside = net_bps[net_bps < 0.0]
+            downside_std = float(np.nanstd(downside)) if downside.size > 0 else np.nan
+            sortino_like = float(avg_net / (downside_std + 1e-9)) if not np.isnan(downside_std) else float("nan")
+        else:
+            sortino_like = float("nan")
+    except Exception:
+        sortino_like = float("nan")
+
+
     # artifacts
     ts_tag = time.strftime("%Y%m%d_%H%M%S")
     tag = f"{symbol}_{interval_code}_{model_name}_{ts_tag}"
@@ -492,10 +533,12 @@ def evaluate_combo(
         "avg_net_ret_per_trade": float(best.get("avg_net_ret_per_trade", float("nan"))),
         "total_net_return": float(best.get("total_net_return", 0.0)),
         "sharpe_like": float(best.get("sharpe_like", float("nan"))),
+        "sortino_like": float(sortino_like),
         "cost_roundtrip": float(2.0 * ((fees_bps + slippage_bps) / 10_000.0)),
         "r2": float("nan"),
         "mae_bps": float("nan"),
         "mape_pct": float("nan"),
+        "log_loss": float(logloss),
     }
 
 
@@ -544,7 +587,7 @@ def main():
         default="sharpe_like",
     )
     p.add_argument("--fees-bps", type=float, default=10.0)
-    p.add_argument("--slippage-bps", type=float, default=3.0)
+    p.add_argument("--slippage-bps", type=float, default=0.0)
     p.add_argument("--task", choices=["classify", "regress"], default="regress")
 
     args = p.parse_args()
@@ -614,10 +657,13 @@ def main():
             "rows",
             "accuracy",
             "r2",
+            "log_loss",
+            "rmse_bps",
             "mape_pct",
             "avg_net_ret_per_bar",
             "total_net_return",
             "sharpe_like",
+            "sortino_like",
             "best_threshold",
             "trades",
         ]
