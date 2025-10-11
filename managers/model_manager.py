@@ -63,6 +63,7 @@ ClassifierName = Literal[
     "voting_soft",
     "stacking",
     "metalabel",
+    "arima",
 ]
 # Simple, practical regressors to start
 RegressorName = Literal["hgb_reg", "rf_reg", "linreg", "svr", "arima"]
@@ -236,6 +237,46 @@ def _hybrid_transformer_builder(meta):
     model.compile(optimizer="adam", loss="binary_crossentropy", metrics=["AUC"])
     return model
 
+class ARIMAClassifier(BaseEstimator, ClassifierMixin):  # sklearn-compatible
+    """
+    ARIMA over a binary target (0/1). Ignores X and models y_t directly.
+    Probabilities are obtained by applying a logistic link to the ARIMA forecast.
+    """
+    def __init__(self, order: Tuple[int, int, int] = (1, 0, 0)):
+        self.order = order
+        self.model_ = None
+        self.results_ = None
+        self.class_prior_ = None  # fallback prior
+
+    def fit(self, X, y):
+        if ARIMA is None:
+            raise ImportError("Install statsmodels to use ARIMA: pip install statsmodels")
+        y_arr = np.asarray(y, dtype=float).ravel()
+        # store class prior for safety
+        self.class_prior_ = float(np.mean(y_arr)) if y_arr.size else 0.5
+        # fit ARIMA on the binary series (as a numeric time series)
+        self.model_ = ARIMA(y_arr, order=self.order)
+        self.results_ = self.model_.fit()
+        return self
+
+    def _sigmoid(self, z):
+        return 1.0 / (1.0 + np.exp(-z))
+
+    def predict_proba(self, X):
+        if self.results_ is None:
+            raise RuntimeError("ARIMAClassifier is not fitted.")
+        n = len(X) if hasattr(X, "__len__") else 1
+        # Forecast n steps ahead; map to (0,1) via logistic; fallback to prior if needed
+        fc = np.asarray(self.results_.forecast(steps=int(n)), dtype=float).ravel()
+        p1 = self._sigmoid(fc)  # logistic link to keep in [0,1]
+        # guard against NaNs
+        if not np.isfinite(p1).all():
+            p1 = np.full(int(n), self.class_prior_ if self.class_prior_ is not None else 0.5)
+        p1 = np.clip(p1, 1e-6, 1 - 1e-6)
+        return np.vstack([1 - p1, p1]).T
+
+    def predict(self, X):
+        return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
 
 class ARIMARegressor(BaseEstimator, RegressorMixin):
     def __init__(self, order: Tuple[int, int, int] = (1, 0, 0)):
@@ -402,6 +443,8 @@ class ModelManager:
             return MetaLabelingClassifier(
                 base=base, meta=meta, threshold=self.metalabel_threshold
             )
+        if name == "arima":
+            return ARIMAClassifier()
         raise ValueError(f"Unknown estimator name: {name}")
 
     def _build_pipeline_clf(self) -> Pipeline:
