@@ -557,7 +557,7 @@ def main():
     )
     p.add_argument(
         "--models",
-        default="logreg,rf,hgb,linsvc,bilstm,gru_lstm,hybrid_transformer,voting_soft,stacking,metalabel",
+        default="logreg,rf,hgb,linsvc,bilstm,gru_lstm,hybrid_transformer,voting_soft,stacking,metalabel,arima",
         help="Comma list for classification; for regression you can still pass these and they map to regressors.",
     )
     p.add_argument("--timelag", type=int, default=16)

@@ -3,7 +3,7 @@ from typing import Callable, List, Literal, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin
+from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin, RegressorMixin  # NEW (ARIMA)
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import (
@@ -45,6 +45,11 @@ except Exception:  # pragma: no cover
     keras = None  # type: ignore
     layers = None  # type: ignore
 
+try:
+    from statsmodels.tsa.arima.model import ARIMA  # type: ignore
+except Exception:  # pragma: no cover
+    ARIMA = None  # type: ignore
+
 # ---- model/type names (keep your existing classifier names) ----
 ClassifierName = Literal[
     "logreg",
@@ -60,7 +65,7 @@ ClassifierName = Literal[
     "metalabel",
 ]
 # Simple, practical regressors to start
-RegressorName = Literal["hgb_reg", "rf_reg", "linreg", "svr"]
+RegressorName = Literal["hgb_reg", "rf_reg", "linreg", "svr", "arima"]
 
 ModelName = Union[ClassifierName, RegressorName]
 Task = Literal["classify", "regress"]
@@ -230,6 +235,31 @@ def _hybrid_transformer_builder(meta):
     model = keras.Model(inp, out)
     model.compile(optimizer="adam", loss="binary_crossentropy", metrics=["AUC"])
     return model
+
+
+class ARIMARegressor(BaseEstimator, RegressorMixin):
+    def __init__(self, order: Tuple[int, int, int] = (1, 0, 0)):
+        self.order = order
+        self.model_ = None
+        self.results_ = None
+
+    def fit(self, X, y):
+        if ARIMA is None:
+            raise ImportError(
+                "Install statsmodels to use ARIMA: pip install statsmodels"
+            )
+        y_arr = np.asarray(y, dtype=float).ravel()
+        self.model_ = ARIMA(y_arr, order=self.order)
+        self.results_ = self.model_.fit()
+        return self
+
+    def predict(self, X):
+        if self.results_ is None:
+            raise RuntimeError("ARIMA model is not fitted.")
+        n_steps = len(X) if hasattr(X, "__len__") else 1
+        # One-step-ahead style: forecast n_steps into the future
+        fc = self.results_.forecast(steps=int(n_steps))
+        return np.asarray(fc, dtype=float).ravel()
 
 
 class ModelManager:
@@ -422,6 +452,8 @@ class ModelManager:
             return Ridge(alpha=1.0, random_state=self.random_state)
         if name == "svr":
             return SVR(kernel="rbf")  # scaled upstream
+        if name == "arima":
+            return ARIMARegressor()
         raise ValueError(f"Unknown regressor name: {name}")
 
     def _build_pipeline_reg(self) -> Pipeline:

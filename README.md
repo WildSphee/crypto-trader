@@ -96,9 +96,9 @@ python backtest.py \
   --symbol BTCUSDT \
   --intervals "4h,8h,1d" \
   --start-list "120d,365d,720d" \
-  --models "logreg,sgdlog,rf,hgb,linsvc,bilstm,gru_lstm,hybrid_transformer,voting_soft,stacking,metalabel" \
+  --models "logreg,sgdlog,rf,hgb,linsvc,bilstm,gru_lstm,hybrid_transformer,voting_soft,stacking,metalabel,arima" \
   --best-metric total_net_return \
-  --fees-bps 10 --slippage-bps 3 \
+  --fees-bps 10 --slippage-bps 0 \
   --split-mode time --test-size 0.2 \
   --task regress
 ```
