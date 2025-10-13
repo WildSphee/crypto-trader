@@ -14,8 +14,8 @@ import talib
 from binance.client import Client
 
 from features.fear_index import get_fng_features
-from features.on_chain_data import get_btc_onchain_smoothed
 from features.fomc import get_fomc_sentiment
+from features.on_chain_data import get_btc_onchain_smoothed
 
 INTERVAL_TO_MS = {
     Client.KLINE_INTERVAL_1MINUTE: 60_000,
