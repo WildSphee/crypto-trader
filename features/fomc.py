@@ -326,7 +326,9 @@ def get_fomc_sentiment(
     event_time_series = pd.Series(ev.index, index=ev.index)
 
     # 2) forward-fill the last event timestamp onto the uniform timeline
-    last_event_time = event_time_series.reindex(idx, method="ffill")  # <-- Series, not tuple
+    last_event_time = event_time_series.reindex(
+        idx, method="ffill"
+    )  # <-- Series, not tuple
 
     # 3) forward-fill the metric values onto the same timeline
     ff = ev.reindex(idx, method="ffill")
