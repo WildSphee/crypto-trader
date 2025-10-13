@@ -39,8 +39,6 @@ DEFAULT_URLS = [
     "https://www.federalreserve.gov/monetarypolicy/fomcminutes20231213.htm",
 ]
 
-# ---------- helpers
-
 
 def _sha256_text(s: str) -> str:
     return hashlib.sha256((s or "").encode("utf-8")).hexdigest()
@@ -213,13 +211,13 @@ _INTERVAL_MAP: Dict[str, str] = {
     "5m": "5min",
     "15m": "15min",
     "30m": "30min",
-    "1h": "1H",
-    "2h": "2H",
-    "4h": "4H",
-    "6h": "6H",
-    "8h": "8H",
-    "12h": "12H",
-    "1d": "1D",
+    "1h": "1h",
+    "2h": "2h",
+    "4h": "4h",
+    "6h": "6h",
+    "8h": "8h",
+    "12h": "12h",
+    "1d": "1d",
 }
 
 
