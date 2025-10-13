@@ -206,7 +206,6 @@ def _fetch_binance(
     return out.set_index("ts_utc").sort_index()
 
 
-# --- public: minimal API ---
 def get_btc_onchain_smoothed(
     start: str,
     end: str,

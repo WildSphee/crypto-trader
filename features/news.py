@@ -1,5 +1,3 @@
-# NOTE, NOT USED YET, AS DONT HAVE A NEWS DATASET
-
 """
 news_to_features.py
 -------------------
@@ -38,37 +36,6 @@ from typing import List
 
 import numpy as np
 import pandas as pd
-
-SOURCE_WEIGHTS = {
-    # credibility weights you can tune
-    "ap": 1.0,
-    "associated press": 1.0,
-    "reuters": 1.0,
-    "bloomberg": 1.0,
-    "wsj": 0.9,
-    "ft": 0.9,
-    "people": 0.3,
-    "the sun": 0.2,
-    "unknown": 0.5,
-}
-
-POS_WORDS = set(
-    "boost boosts soar soars jump jumps rally rallies surge surges positive upbeat strong record win wins victory progress growth bullish cut cuts easing cools cool cooling".split()
-)
-NEG_WORDS = set(
-    "war wars conflict conflicts strike strikes shut shutdown shutdowns sanction sanctions crash crashes slump slumps plunge plunges negative bleak weak loss losses decline declines bearish hike hikes spike spikes inflation hot hotter surge surges uncertainty probe probes indictment indictments".split()
-)
-INTENSIFIERS = set("very significant major severe escalating urgent breaking".split())
-DEINTENSIFIERS = set("may might could reportedly".split())
-
-TOPIC_KEYWORDS = {
-    "is_trump": r"\btrump\b",
-    "is_geopolitical": r"\bwar|conflict|strike|attack|missile|sanction|invade|troop|military\b",
-    "is_policy": r"\bshutdown|congress|white house|executive order|regulation|policy|tariff\b",
-    "is_crime_cartels": r"\bcartel|cartels|drug\s+war|narco\b",
-    "is_macro": r"\binflation|cpi|jobs report|payroll|rate hike|rate cut|fed|federal reserve\b",
-    "is_crypto_specific": r"\bbitcoin|btc|crypto|etf|halving|miner|mining\b",
-}
 
 
 def normalize_text(s: str) -> str:
