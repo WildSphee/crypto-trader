@@ -587,7 +587,7 @@ def main():
         default="sharpe_like",
     )
     p.add_argument("--fees-bps", type=float, default=10.0)
-    p.add_argument("--slippage-bps", type=float, default=0.0)
+    p.add_argument("--slippage-bps", type=float, default=1.5)
     p.add_argument("--task", choices=["classify", "regress"], default="regress")
 
     args = p.parse_args()
