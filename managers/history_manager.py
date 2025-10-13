@@ -15,6 +15,7 @@ from binance.client import Client
 
 from features.fear_index import get_fng_features
 from features.on_chain_data import get_btc_onchain_smoothed
+from features.fomc import get_fomc_sentiment
 
 INTERVAL_TO_MS = {
     Client.KLINE_INTERVAL_1MINUTE: 60_000,
@@ -102,6 +103,8 @@ class HistoryManager:
         fng_kwargs: Optional[Dict[str, Any]] = None,
         include_onchain: bool = True,
         onchain_kwargs: Optional[Dict[str, Any]] = None,
+        include_fomc: bool = True,
+        fomc_kwargs: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.client = client
         self.symbol = symbol
@@ -118,6 +121,8 @@ class HistoryManager:
         self.fng_kwargs = fng_kwargs or {}
         self.include_onchain = include_onchain
         self.onchain_kwargs = onchain_kwargs or {}
+        self.include_fomc = include_fomc
+        self.fomc_kwargs = fomc_kwargs or {}
 
         # data holders
         self.df_ohlcv: pd.DataFrame = pd.DataFrame()
@@ -311,6 +316,25 @@ class HistoryManager:
                         fng_aligned.index = feat.index
                         feat = feat.join(fng_aligned, how="left")
                         appended_cols.extend(list(fng_aligned.columns))
+            except Exception:
+                pass
+
+        # fomc sentiment
+        if self.include_fomc:
+            try:
+                fomc_df = get_fomc_sentiment(
+                    start=start_iso,
+                    end=end_iso,
+                    interval=code_iv,
+                    **self.fomc_kwargs,
+                )
+                if not fomc_df.empty:
+                    fomc_num = fomc_df.select_dtypes(include=[np.number])
+                    if not fomc_num.empty:
+                        fomc_aligned = fomc_num.reindex(ts_utc, method="ffill")
+                        fomc_aligned.index = feat.index
+                        feat = feat.join(fomc_aligned, how="left")
+                        appended_cols.extend(list(fomc_aligned.columns))
             except Exception:
                 pass
 
