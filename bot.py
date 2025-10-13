@@ -1,15 +1,16 @@
-import time
 import math
+import time
+
 import numpy as np
 import pandas as pd
 from binance.client import Client
 
 import config
+from evaluations.evaluator import choose_best_threshold_for_window
+from evaluations.metrics import SweepConfig
 from managers.history_manager import INTERVAL_TO_MS, HistoryManager
 from managers.model_manager import ModelManager
 from managers.position_manager import PositionManager, SizingConfig
-from evaluations.evaluator import choose_best_threshold_for_window
-from evaluations.metrics import SweepConfig
 
 _INTERVAL_MAP = {
     "1m": Client.KLINE_INTERVAL_1MINUTE,

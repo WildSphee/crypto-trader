@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Dict
-import numpy as np
 
+import numpy as np
 
 MINUTES_MAP = {
     "1m": 1,

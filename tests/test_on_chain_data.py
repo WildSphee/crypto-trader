@@ -2,9 +2,9 @@ import pandas as pd
 import pytest
 
 from features.on_chain_data import (
-    get_btc_onchain_smoothed,
-    SUPPORTED_INTERVALS,
     BTC_METRICS,
+    SUPPORTED_INTERVALS,
+    get_btc_onchain_smoothed,
 )
 
 # ---- Fixtures & helpers ----

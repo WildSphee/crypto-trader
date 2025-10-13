@@ -1,6 +1,7 @@
-import requests
-import pandas as pd
 from typing import Literal, Optional
+
+import pandas as pd
+import requests
 
 """
 example output (4h interval, lookback_days=3, past_only=True):

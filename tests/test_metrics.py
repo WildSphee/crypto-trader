@@ -1,13 +1,14 @@
 import math
+
 import numpy as np
 import pytest
 
 from evaluations.metrics import (
-    bars_per_year_from_interval,
-    one_bar_pnl,
-    evaluate_threshold,
-    sweep_thresholds,
     SweepConfig,
+    bars_per_year_from_interval,
+    evaluate_threshold,
+    one_bar_pnl,
+    sweep_thresholds,
 )
 
 

@@ -6,7 +6,7 @@
 # - Merges Fear & Greed and BTC on-chain features (defaults: enabled)
 # - Updates with the latest closed bar and exposes prediction features
 
-from typing import Tuple, Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd

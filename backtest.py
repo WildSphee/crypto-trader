@@ -1,6 +1,7 @@
 import argparse
 import os
 import time
+import warnings
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -11,22 +12,19 @@ from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
     f1_score,
+    log_loss,
+    mean_absolute_error,
+    mean_squared_error,
     precision_score,
     recall_score,
     roc_auc_score,
-    mean_absolute_error,
-    log_loss,
-    mean_squared_error,
 )
 
 import config
+from evaluations.evaluator import choose_best_threshold_for_window
+from evaluations.metrics import SweepConfig, safe_mape_pct
 from managers.history_manager import HistoryManager
 from managers.model_manager import ModelManager
-
-from evaluations.metrics import SweepConfig, safe_mape_pct
-from evaluations.evaluator import choose_best_threshold_for_window
-
-import warnings
 
 warnings.filterwarnings("ignore", category=UserWarning, module="tensorflow")
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
@@ -125,7 +123,11 @@ def sweep_on_predicted_return(
         # Sortino-like: mean / downside std (only negative net bars)
         downside = net[net < 0.0]
         downside_std = float(np.nanstd(downside)) if downside.size > 0 else np.nan
-        sortino_like = float(avg / (downside_std + 1e-9)) if not np.isnan(downside_std) else float("nan")
+        sortino_like = (
+            float(avg / (downside_std + 1e-9))
+            if not np.isnan(downside_std)
+            else float("nan")
+        )
 
         metric = {
             "total_net_return": total,
@@ -155,6 +157,7 @@ def sweep_on_predicted_return(
             }
         )
     return best
+
 
 def evaluate_combo(
     symbol: str,
@@ -454,12 +457,15 @@ def evaluate_combo(
             avg_net = float(np.nanmean(net_bps))
             downside = net_bps[net_bps < 0.0]
             downside_std = float(np.nanstd(downside)) if downside.size > 0 else np.nan
-            sortino_like = float(avg_net / (downside_std + 1e-9)) if not np.isnan(downside_std) else float("nan")
+            sortino_like = (
+                float(avg_net / (downside_std + 1e-9))
+                if not np.isnan(downside_std)
+                else float("nan")
+            )
         else:
             sortino_like = float("nan")
     except Exception:
         sortino_like = float("nan")
-
 
     # artifacts
     ts_tag = time.strftime("%Y%m%d_%H%M%S")

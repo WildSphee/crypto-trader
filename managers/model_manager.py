@@ -2,25 +2,29 @@ from typing import Callable, List, Literal, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
-
-from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin, RegressorMixin  # NEW (ARIMA)
+import tensorflow as tf
+from sklearn.base import (
+    BaseEstimator,
+    ClassifierMixin,
+    RegressorMixin,
+    TransformerMixin,
+)  # NEW (ARIMA)
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import (
     HistGradientBoostingClassifier,
-    RandomForestClassifier,
-    VotingClassifier,
-    StackingClassifier,
-    RandomForestRegressor,
     HistGradientBoostingRegressor,
+    RandomForestClassifier,
+    RandomForestRegressor,
+    StackingClassifier,
+    VotingClassifier,
 )
-from sklearn.linear_model import LogisticRegression, SGDClassifier, Ridge
+from sklearn.linear_model import LogisticRegression, Ridge, SGDClassifier
 from sklearn.metrics import accuracy_score, r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.svm import LinearSVC, SVR
-import tensorflow as tf
+from sklearn.svm import SVR, LinearSVC
 
 try:
     from xgboost import XGBClassifier  # type: ignore
@@ -237,11 +241,13 @@ def _hybrid_transformer_builder(meta):
     model.compile(optimizer="adam", loss="binary_crossentropy", metrics=["AUC"])
     return model
 
+
 class ARIMAClassifier(BaseEstimator, ClassifierMixin):  # sklearn-compatible
     """
     ARIMA over a binary target (0/1). Ignores X and models y_t directly.
     Probabilities are obtained by applying a logistic link to the ARIMA forecast.
     """
+
     def __init__(self, order: Tuple[int, int, int] = (1, 0, 0)):
         self.order = order
         self.model_ = None
@@ -250,7 +256,9 @@ class ARIMAClassifier(BaseEstimator, ClassifierMixin):  # sklearn-compatible
 
     def fit(self, X, y):
         if ARIMA is None:
-            raise ImportError("Install statsmodels to use ARIMA: pip install statsmodels")
+            raise ImportError(
+                "Install statsmodels to use ARIMA: pip install statsmodels"
+            )
         y_arr = np.asarray(y, dtype=float).ravel()
         # store class prior for safety
         self.class_prior_ = float(np.mean(y_arr)) if y_arr.size else 0.5
@@ -271,12 +279,15 @@ class ARIMAClassifier(BaseEstimator, ClassifierMixin):  # sklearn-compatible
         p1 = self._sigmoid(fc)  # logistic link to keep in [0,1]
         # guard against NaNs
         if not np.isfinite(p1).all():
-            p1 = np.full(int(n), self.class_prior_ if self.class_prior_ is not None else 0.5)
+            p1 = np.full(
+                int(n), self.class_prior_ if self.class_prior_ is not None else 0.5
+            )
         p1 = np.clip(p1, 1e-6, 1 - 1e-6)
         return np.vstack([1 - p1, p1]).T
 
     def predict(self, X):
         return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
+
 
 class ARIMARegressor(BaseEstimator, RegressorMixin):
     def __init__(self, order: Tuple[int, int, int] = (1, 0, 0)):

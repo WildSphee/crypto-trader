@@ -1,6 +1,7 @@
-import requests
+from typing import Dict, List, Literal, Optional
+
 import pandas as pd
-from typing import Dict, List, Optional, Literal
+import requests
 
 """
 

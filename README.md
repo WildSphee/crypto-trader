@@ -98,7 +98,7 @@ python backtest.py \
   --start-list "120d,365d,720d" \
   --models "logreg,sgdlog,rf,hgb,linsvc,bilstm,gru_lstm,hybrid_transformer,voting_soft,stacking,metalabel,arima" \
   --best-metric total_net_return \
-  --fees-bps 10 --slippage-bps 0 \
+  --fees-bps 10 --slippage-bps 1.5 \
   --split-mode time --test-size 0.2 \
   --task regress
 ```

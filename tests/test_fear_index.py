@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from features.fear_index import get_fng_features, SUPPORTED_INTERVALS
+from features.fear_index import SUPPORTED_INTERVALS, get_fng_features
 
 # ---- Fixtures & helpers ----
 
