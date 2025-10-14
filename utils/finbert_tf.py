@@ -2,7 +2,7 @@ import re
 from typing import Dict, List
 
 import numpy as np
-from transformers import AutoTokenizer, TFAutoModelForSequenceClassification
+from transformers import AutoTokenizer, TFBertForSequenceClassification
 
 _FINBERT_REPO = "yiyanghkust/finbert-tone"
 
@@ -32,7 +32,7 @@ class FinBertTF:
         self.batch_size = batch_size
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         # load native TF weights (no from_pt, no torch)
-        self.model = TFAutoModelForSequenceClassification.from_pretrained(model_name)
+        self.model = TFBertForSequenceClassification.from_pretrained(model_name)
 
     @staticmethod
     def _softmax(x: np.ndarray) -> np.ndarray:
