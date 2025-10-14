@@ -102,6 +102,15 @@ python backtest.py \
   --split-mode time --test-size 0.2 \
   --task regress
 ```
+<!-- python backtest.py \
+  --symbol BTCUSDT \
+  --intervals "4h" \
+  --start-list "120d" \
+  --models "logreg" \
+  --best-metric total_net_return \
+  --fees-bps 10 --slippage-bps 1.5 \
+  --split-mode time --test-size 0.2 \
+  --task regress -->
 
 Results land in `backtest_output/metrics/`.
 

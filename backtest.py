@@ -25,6 +25,7 @@ from evaluations.evaluator import choose_best_threshold_for_window
 from evaluations.metrics import SweepConfig, safe_mape_pct
 from managers.history_manager import HistoryManager
 from managers.model_manager import ModelManager
+from metrics.deflated_sharpe import deflated_sharpe_ratio
 
 warnings.filterwarnings("ignore", category=UserWarning, module="tensorflow")
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
@@ -108,6 +109,8 @@ def sweep_on_predicted_return(
     if thr_grid_bps is None:
         thr_grid_bps = np.arange(0.0, 60.1, 1.0)  # 0..60 bps
 
+    trial_srs: List[float] = []
+
     best = {"threshold": 0.0, "total_net_return": float("-inf")}
     for thr in thr_grid_bps:
         take = yhat_bps >= (thr + cost_bps)
@@ -118,7 +121,10 @@ def sweep_on_predicted_return(
         total = float(np.nansum(net))
         avg = float(np.nanmean(net))
         std = float(np.nanstd(net))
+
         sharpe_like = float(avg / (std + 1e-9))
+        if std > 0 and np.isfinite(sharpe_like):
+            trial_srs.append(sharpe_like)
 
         # Sortino-like: mean / downside std (only negative net bars)
         downside = net[net < 0.0]
@@ -156,6 +162,7 @@ def sweep_on_predicted_return(
                 "sortino_like": float("nan"),
             }
         )
+    best["trial_srs"] = trial_srs
     return best
 
 
@@ -248,6 +255,12 @@ def evaluate_combo(
             cost_bps=cost_bps,
             best_metric=best_metric,
         )
+        # for deflated sharpe ratio
+        thr = float(best.get("threshold", 0.0))
+        take_best = yhat_test >= (thr + cost_bps)
+        net_bps_best = (np.asarray(y_test, dtype=float)[take_best]) - cost_bps
+        dsr = deflated_sharpe_ratio(net_bps_best, best.get("trial_srs", []))
+
         mape_pct = safe_mape_pct(y_test, yhat_test)
 
         # artifacts
@@ -314,6 +327,7 @@ def evaluate_combo(
             "avg_net_ret_per_trade": float("nan"),
             "total_net_return": float(best.get("total_net_return", 0.0)),
             "sharpe_like": float(best.get("sharpe_like", float("nan"))),
+            "deflated_sharpe": float(dsr),
             "sortino_like": float(best.get("sortino_like", float("nan"))),
             "cost_roundtrip": float(2.0 * ((fees_bps + slippage_bps) / 10_000.0)),
             "r2": float(r2),
